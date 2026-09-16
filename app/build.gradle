@@ -2,6 +2,11 @@ plugins {
     id 'com.android.application'
 }
 
+def signingStoreFile = System.getenv("SIGNING_STORE_FILE")
+def signingStorePassword = System.getenv("SIGNING_STORE_PASSWORD")
+def signingKeyAlias = System.getenv("SIGNING_KEY_ALIAS")
+def signingKeyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+
 android {
     namespace 'com.locutortts.app'
     compileSdk 35
@@ -10,8 +15,26 @@ android {
         applicationId "com.locutortts.app"
         minSdk 29
         targetSdk 35
-        versionCode 4
-        versionName "1.4"
+        versionCode 5
+        versionName "1.5"
+    }
+
+    signingConfigs {
+        release {
+            if (signingStoreFile != null && !signingStoreFile.isEmpty()) {
+                storeFile file(signingStoreFile)
+                storePassword signingStorePassword
+                keyAlias signingKeyAlias
+                keyPassword signingKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
     }
 
     compileOptions {
