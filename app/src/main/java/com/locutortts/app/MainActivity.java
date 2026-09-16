@@ -1,6 +1,7 @@
 package com.locutortts.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
@@ -94,6 +95,11 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         tp.setMargins(0,dp(10),0,dp(10));
         root.addView(textBox,tp);
 
+        Button saveProject = new Button(this);
+        saveProject.setText("📁 GUARDAR PROYECTO");
+        saveProject.setOnClickListener(v -> askProjectName());
+        root.addView(saveProject);
+
         root.addView(label("Voz",16));
         voiceBox = new Spinner(this); root.addView(voiceBox);
 
@@ -124,6 +130,69 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         progress = new ProgressBar(this); progress.setVisibility(View.GONE); root.addView(progress);
         status = label("Inicializando voz...",14); status.setTextColor(Color.DKGRAY); root.addView(status);
         setContentView(scroll);
+    }
+
+    private void askProjectName() {
+        String current = nameBox == null ? "" : nameBox.getText().toString().trim();
+        if (current.isEmpty() || "locucion".equalsIgnoreCase(current)) current = "Mi proyecto";
+
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Nombre del proyecto");
+        input.setText(current);
+        input.selectAll();
+
+        new AlertDialog.Builder(this)
+                .setTitle("Guardar proyecto")
+                .setMessage("Se guardarán el texto, la voz, la velocidad, el tono y el nombre del audio.")
+                .setView(input)
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Guardar", (dialog, which) -> saveProject(input.getText().toString().trim()))
+                .show();
+    }
+
+    private void saveProject(String projectName) {
+        if (projectName.isEmpty()) {
+            toast("Escribe un nombre para el proyecto.");
+            return;
+        }
+        if (textBox.getText().toString().trim().isEmpty()) {
+            toast("Escribe o carga un texto antes de guardar el proyecto.");
+            return;
+        }
+
+        if (ProjectStore.exists(this, projectName)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Proyecto existente")
+                    .setMessage("Ya existe un proyecto llamado ‘" + projectName + "’. ¿Quieres reemplazarlo?")
+                    .setNegativeButton("Cancelar", null)
+                    .setPositiveButton("Reemplazar", (dialog, which) -> writeProject(projectName))
+                    .show();
+            return;
+        }
+        writeProject(projectName);
+    }
+
+    private void writeProject(String projectName) {
+        String text = textBox.getText().toString();
+        String audioName = nameBox.getText().toString().trim();
+        int voicePosition = voiceBox.getSelectedItemPosition();
+        String voiceLabel = (voicePosition >= 0 && voicePosition < voiceLabels.size())
+                ? voiceLabels.get(voicePosition) : "Voz predeterminada · Español México";
+        String voiceName = (voicePosition > 0 && voicePosition - 1 < voices.size())
+                ? voices.get(voicePosition - 1).getName() : "";
+        int speed = speedBar.getProgress();
+        int pitch = pitchBar.getProgress();
+
+        status.setText("Guardando proyecto...");
+        new Thread(() -> {
+            try {
+                ProjectStore.save(this, projectName, text, audioName, voiceName, voiceLabel, speed, pitch);
+                runOnUiThread(() -> status.setText("✅ Proyecto ‘" + projectName + "’ guardado."));
+            } catch (Exception e) {
+                runOnUiThread(() -> status.setText("No se pudo guardar el proyecto: " + e.getMessage()));
+            }
+        }).start();
     }
 
     private void setupAutoSlider(SeekBar bar, boolean speed) {
