@@ -10,6 +10,8 @@ import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.speech.tts.TextToSpeech;
@@ -34,7 +36,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private EditText textBox, nameBox;
     private Spinner voiceBox;
     private SeekBar speedBar, pitchBar;
-    private TextView status;
+    private TextView speedValue, pitchValue, status;
     private ProgressBar progress;
     private Button generateBtn, playBtn, saveBtn, shareBtn;
 
@@ -49,6 +51,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private File pendingAudioFile;
     private String pendingAudioName = "locucion.wav";
     private MediaPlayer player;
+
+    private final Handler autoUpdateHandler = new Handler(Looper.getMainLooper());
+    private Runnable autoUpdateRunnable;
+    private boolean hasGeneratedOnce = false;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -67,7 +73,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         scroll.addView(root);
 
         root.addView(label("🎙️ Locutor TTS", 28));
-        TextView help = label("Genera el audio, escúchalo primero y guárdalo solamente cuando te guste.", 15);
+        TextView help = label("Genera el audio, escúchalo primero y guárdalo solamente cuando te guste. Si cambias velocidad o tono después de generar, el audio se actualizará solo.", 15);
         help.setTextColor(Color.DKGRAY);
         root.addView(help);
 
@@ -90,10 +96,17 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         root.addView(label("Voz",16));
         voiceBox = new Spinner(this); root.addView(voiceBox);
-        root.addView(label("Velocidad",16));
+
+        speedValue = label("Velocidad · 1.00x",16);
+        root.addView(speedValue);
         speedBar = new SeekBar(this); speedBar.setMax(150); speedBar.setProgress(50); root.addView(speedBar);
-        root.addView(label("Tono",16));
+
+        pitchValue = label("Tono · 1.00x",16);
+        root.addView(pitchValue);
         pitchBar = new SeekBar(this); pitchBar.setMax(150); pitchBar.setProgress(50); root.addView(pitchBar);
+
+        setupAutoSlider(speedBar, true);
+        setupAutoSlider(pitchBar, false);
 
         root.addView(label("Nombre del audio",16));
         nameBox = new EditText(this); nameBox.setText("locucion"); nameBox.setSingleLine(); root.addView(nameBox);
@@ -111,6 +124,37 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         progress = new ProgressBar(this); progress.setVisibility(View.GONE); root.addView(progress);
         status = label("Inicializando voz...",14); status.setTextColor(Color.DKGRAY); root.addView(status);
         setContentView(scroll);
+    }
+
+    private void setupAutoSlider(SeekBar bar, boolean speed) {
+        bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progressValue, boolean fromUser) {
+                float value = 0.5f + progressValue / 100f;
+                if (speed) speedValue.setText(String.format(Locale.US, "Velocidad · %.2fx", value));
+                else pitchValue.setText(String.format(Locale.US, "Tono · %.2fx", value));
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {
+                if (autoUpdateRunnable != null) autoUpdateHandler.removeCallbacks(autoUpdateRunnable);
+            }
+
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                scheduleAutomaticRegeneration();
+            }
+        });
+    }
+
+    private void scheduleAutomaticRegeneration() {
+        if (!hasGeneratedOnce) {
+            status.setText("Ajustes listos. Pulsa Generar audio para crear la primera versión.");
+            return;
+        }
+        if (textBox.getText().toString().trim().isEmpty()) return;
+
+        if (autoUpdateRunnable != null) autoUpdateHandler.removeCallbacks(autoUpdateRunnable);
+        status.setText("Actualizando audio con los nuevos ajustes...");
+        autoUpdateRunnable = () -> generate(true);
+        autoUpdateHandler.postDelayed(autoUpdateRunnable, 450);
     }
 
     private TextView label(String s, int size) {
@@ -246,16 +290,28 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         return "archivo";
     }
 
-    private void generate() {
+    private void generate() { generate(false); }
+
+    private void generate(boolean automatic) {
         String text=DocumentReader.clean(textBox.getText().toString());
         if(text.isEmpty()){toast("Escribe texto o abre un archivo.");return;}
-        int pos=voiceBox.getSelectedItemPosition(); if(pos>0&&pos-1<voices.size()) tts.setVoice(voices.get(pos-1)); else tts.setLanguage(new Locale("es","MX"));
-        tts.setSpeechRate(0.5f+speedBar.getProgress()/100f); tts.setPitch(0.5f+pitchBar.getProgress()/100f);
+
+        if (tts != null) tts.stop();
+        if (player != null) { player.release(); player = null; }
+
+        int pos=voiceBox.getSelectedItemPosition();
+        if(pos>0&&pos-1<voices.size()) tts.setVoice(voices.get(pos-1));
+        else tts.setLanguage(new Locale("es","MX"));
+
+        tts.setSpeechRate(0.5f+speedBar.getProgress()/100f);
+        tts.setPitch(0.5f+pitchBar.getProgress()/100f);
         chunks=TextChunks.split(text, Math.min(3400,TextToSpeech.getMaxSpeechInputLength()-200));
         parts.clear(); partIndex=0; sessionId=UUID.randomUUID().toString(); savedAudio=null; pendingAudioFile=null;
         File dir=new File(getCacheDir(),"tts_parts"); dir.mkdirs(); File[] old=dir.listFiles(); if(old!=null)for(File f:old)f.delete();
         for(int i=0;i<chunks.size();i++) parts.add(new File(dir,String.format(Locale.US,"part_%03d.wav",i)));
-        generateBtn.setEnabled(false); playBtn.setEnabled(false); saveBtn.setEnabled(false); shareBtn.setEnabled(false); progress.setVisibility(View.VISIBLE); synthesizePart();
+        generateBtn.setEnabled(false); playBtn.setEnabled(false); saveBtn.setEnabled(false); shareBtn.setEnabled(false); progress.setVisibility(View.VISIBLE);
+        status.setText(automatic ? "Actualizando audio automáticamente..." : "Preparando audio...");
+        synthesizePart();
     }
 
     private void synthesizePart() {
@@ -270,10 +326,11 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             String base=nameBox.getText().toString().trim().replaceAll("[\\\\/:*?\"<>|]+","_"); if(base.isEmpty())base="locucion";
             pendingAudioFile = merged;
             pendingAudioName = base + ".wav";
+            hasGeneratedOnce = true;
             runOnUiThread(() -> {
                 progress.setVisibility(View.GONE); generateBtn.setEnabled(true);
                 playBtn.setEnabled(true); saveBtn.setEnabled(true); shareBtn.setEnabled(false);
-                status.setText("✅ Audio generado. Escúchalo y, si te gusta, pulsa Guardar audio.");
+                status.setText("✅ Audio actualizado. Puedes escucharlo o guardarlo.");
             });
         } catch(Exception e){ fail("No se pudo preparar el audio: "+e.getMessage()); }
     }
@@ -335,5 +392,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private int dp(int x){return Math.round(x*getResources().getDisplayMetrics().density);}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 
-    @Override protected void onDestroy(){if(player!=null)player.release();if(tts!=null){tts.stop();tts.shutdown();}super.onDestroy();}
+    @Override protected void onDestroy(){
+        if(autoUpdateRunnable!=null) autoUpdateHandler.removeCallbacks(autoUpdateRunnable);
+        if(player!=null)player.release();
+        if(tts!=null){tts.stop();tts.shutdown();}
+        super.onDestroy();
+    }
 }
