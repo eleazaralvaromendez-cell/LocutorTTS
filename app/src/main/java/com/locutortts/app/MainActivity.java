@@ -18,6 +18,8 @@ import android.provider.OpenableColumns;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.*;
@@ -30,17 +32,26 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.text.DateFormat;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity implements TextToSpeech.OnInitListener {
     private static final int PICK_FILE = 100;
     private static final int SAVE_AUDIO = 101;
+    private static final String PREFS = "locutor_tts_preferences";
+    private static final String PREF_CURRENT_PROJECT = "current_project";
 
     private EditText textBox, nameBox;
     private Spinner voiceBox;
     private SeekBar speedBar, pitchBar;
-    private TextView speedValue, pitchValue, status;
+    private TextView speedValue, pitchValue, status, projectTitle, autoSaveState, drawerCurrent;
     private ProgressBar progress;
     private Button generateBtn, playBtn, saveBtn, shareBtn;
+
+    private FrameLayout appFrame;
+    private LinearLayout drawer;
+    private View drawerScrim;
+    private boolean drawerOpen = false;
 
     private TextToSpeech tts;
     private final List<Voice> voices = new ArrayList<>();
@@ -60,15 +71,45 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private String pendingVoiceName;
     private String pendingVoiceLabel;
 
+    private final Handler projectSaveHandler = new Handler(Looper.getMainLooper());
+    private Runnable projectSaveRunnable;
+    private final ExecutorService projectExecutor = Executors.newSingleThreadExecutor();
+    private String currentProjectName = "Sin título";
+    private boolean suppressAutoSave = false;
+
+    private static final class ProjectSnapshot {
+        final String projectName;
+        final String text;
+        final String audioName;
+        final String voiceName;
+        final String voiceLabel;
+        final int speed;
+        final int pitch;
+
+        ProjectSnapshot(String projectName, String text, String audioName,
+                        String voiceName, String voiceLabel, int speed, int pitch) {
+            this.projectName = projectName;
+            this.text = text;
+            this.audioName = audioName;
+            this.voiceName = voiceName;
+            this.voiceLabel = voiceLabel;
+            this.speed = speed;
+            this.pitch = pitch;
+        }
+    }
+
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         PDFBoxResourceLoader.init(getApplicationContext());
         buildUi();
+        restoreCurrentProject();
         tts = new TextToSpeech(this, this);
     }
 
     private void buildUi() {
         int p = dp(16);
+        appFrame = new FrameLayout(this);
+
         ScrollView scroll = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -76,8 +117,31 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         root.setBackgroundColor(Color.rgb(248,250,252));
         scroll.addView(root);
 
-        root.addView(label("🎙️ Locutor TTS", 28));
-        TextView help = label("Genera el audio, escúchalo primero y guárdalo solamente cuando te guste. Si cambias velocidad o tono después de generar, el audio se actualizará solo.", 15);
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        Button menu = new Button(this);
+        menu.setText("☰");
+        menu.setTextSize(22);
+        menu.setMinWidth(0);
+        menu.setMinimumWidth(0);
+        menu.setPadding(0,0,0,0);
+        menu.setOnClickListener(v -> openDrawer());
+        header.addView(menu, new LinearLayout.LayoutParams(dp(52), dp(52)));
+        TextView appTitle = label("🎙️ Locutor TTS", 26);
+        appTitle.setPadding(dp(8),0,0,0);
+        header.addView(appTitle, new LinearLayout.LayoutParams(0,-2,1));
+        root.addView(header);
+
+        projectTitle = label("Proyecto: Sin título", 15);
+        projectTitle.setTextColor(Color.rgb(55,65,81));
+        root.addView(projectTitle);
+        autoSaveState = label("✓ Guardado automático", 12);
+        autoSaveState.setTextColor(Color.rgb(75,85,99));
+        autoSaveState.setPadding(0,0,0,dp(6));
+        root.addView(autoSaveState);
+
+        TextView help = label("Genera el audio, escúchalo primero y guárdalo solamente cuando te guste. Tus cambios del proyecto se guardan automáticamente.", 15);
         help.setTextColor(Color.DKGRAY);
         root.addView(help);
 
@@ -97,17 +161,6 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, dp(300));
         tp.setMargins(0,dp(10),0,dp(10));
         root.addView(textBox,tp);
-
-        LinearLayout projectActions = new LinearLayout(this);
-        Button saveProject = new Button(this);
-        saveProject.setText("💾 Guardar proyecto");
-        saveProject.setOnClickListener(v -> askProjectName());
-        Button myProjects = new Button(this);
-        myProjects.setText("📚 Mis proyectos");
-        myProjects.setOnClickListener(v -> showProjects());
-        projectActions.addView(saveProject, new LinearLayout.LayoutParams(0,-2,1));
-        projectActions.addView(myProjects, new LinearLayout.LayoutParams(0,-2,1));
-        root.addView(projectActions);
 
         root.addView(label("Voz",16));
         voiceBox = new Spinner(this); root.addView(voiceBox);
@@ -138,75 +191,222 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         progress = new ProgressBar(this); progress.setVisibility(View.GONE); root.addView(progress);
         status = label("Inicializando voz...",14); status.setTextColor(Color.DKGRAY); root.addView(status);
-        setContentView(scroll);
+
+        appFrame.addView(scroll, new FrameLayout.LayoutParams(-1,-1));
+        buildDrawer();
+        setContentView(appFrame);
+
+        TextWatcher watcher = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { scheduleProjectSave(2000); }
+            @Override public void afterTextChanged(Editable s) {}
+        };
+        textBox.addTextChangedListener(watcher);
+        nameBox.addTextChangedListener(watcher);
     }
 
-    private void askProjectName() {
-        String current = nameBox == null ? "" : nameBox.getText().toString().trim();
-        if (current.isEmpty() || "locucion".equalsIgnoreCase(current)) current = "Mi proyecto";
+    private void buildDrawer() {
+        drawerScrim = new View(this);
+        drawerScrim.setBackgroundColor(0x66000000);
+        drawerScrim.setVisibility(View.GONE);
+        drawerScrim.setOnClickListener(v -> closeDrawer());
+        appFrame.addView(drawerScrim, new FrameLayout.LayoutParams(-1,-1));
+
+        drawer = new LinearLayout(this);
+        drawer.setOrientation(LinearLayout.VERTICAL);
+        drawer.setPadding(dp(18), dp(24), dp(18), dp(18));
+        drawer.setBackgroundColor(Color.WHITE);
+        drawer.setVisibility(View.GONE);
+
+        TextView title = label("🎙️ Locutor TTS", 24);
+        drawer.addView(title);
+        drawerCurrent = label("Proyecto: Sin título", 14);
+        drawerCurrent.setTextColor(Color.DKGRAY);
+        drawer.addView(drawerCurrent);
+
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.rgb(229,231,235));
+        LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(-1, dp(1));
+        dividerParams.setMargins(0,dp(12),0,dp(12));
+        drawer.addView(divider, dividerParams);
+
+        Button newProject = new Button(this);
+        newProject.setText("＋ Nuevo proyecto");
+        newProject.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        newProject.setOnClickListener(v -> askNewProject());
+        drawer.addView(newProject, new LinearLayout.LayoutParams(-1, dp(56)));
+
+        Button projects = new Button(this);
+        projects.setText("📚 Mis proyectos");
+        projects.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        projects.setOnClickListener(v -> {
+            closeDrawer();
+            showProjects();
+        });
+        drawer.addView(projects, new LinearLayout.LayoutParams(-1, dp(56)));
+
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int drawerWidth = Math.min(dp(300), (int)(screenWidth * 0.86f));
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(drawerWidth, -1, Gravity.START);
+        appFrame.addView(drawer, params);
+    }
+
+    private void openDrawer() {
+        if (drawerOpen) return;
+        drawerOpen = true;
+        drawerScrim.setAlpha(0f);
+        drawerScrim.setVisibility(View.VISIBLE);
+        drawer.setVisibility(View.VISIBLE);
+        drawer.setTranslationX(-drawer.getLayoutParams().width);
+        drawer.animate().translationX(0f).setDuration(180).start();
+        drawerScrim.animate().alpha(1f).setDuration(180).start();
+    }
+
+    private void closeDrawer() {
+        if (!drawerOpen) return;
+        drawerOpen = false;
+        int width = drawer.getLayoutParams().width;
+        drawer.animate().translationX(-width).setDuration(160).withEndAction(() -> drawer.setVisibility(View.GONE)).start();
+        drawerScrim.animate().alpha(0f).setDuration(160).withEndAction(() -> drawerScrim.setVisibility(View.GONE)).start();
+    }
+
+    private void restoreCurrentProject() {
+        try {
+            String preferred = getSharedPreferences(PREFS, MODE_PRIVATE).getString(PREF_CURRENT_PROJECT, "");
+            ProjectStore.Project project = null;
+            if (!preferred.isEmpty() && ProjectStore.exists(this, preferred)) {
+                project = ProjectStore.load(this, preferred);
+            } else {
+                List<ProjectStore.Project> projects = ProjectStore.list(this);
+                if (!projects.isEmpty()) project = projects.get(0);
+            }
+            if (project != null) {
+                openProject(project, false);
+            } else {
+                setCurrentProjectName("Sin título");
+                autoSaveState.setText("✓ Guardado automático");
+            }
+        } catch (Exception e) {
+            setCurrentProjectName("Sin título");
+            status.setText("No pude recuperar el último proyecto, pero puedes seguir trabajando.");
+        }
+    }
+
+    private void setCurrentProjectName(String name) {
+        currentProjectName = (name == null || name.trim().isEmpty()) ? "Sin título" : name.trim();
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(PREF_CURRENT_PROJECT, currentProjectName).apply();
+        if (projectTitle != null) projectTitle.setText("Proyecto: " + currentProjectName);
+        if (drawerCurrent != null) drawerCurrent.setText("Proyecto: " + currentProjectName);
+    }
+
+    private void askNewProject() {
+        saveCurrentProjectAsync(false);
+        closeDrawer();
 
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setHint("Nombre del proyecto");
-        input.setText(current);
+        input.setText("Nuevo proyecto");
         input.selectAll();
 
         new AlertDialog.Builder(this)
-                .setTitle("Guardar proyecto")
-                .setMessage("Se guardarán el texto, la voz, la velocidad, el tono y el nombre del audio.")
+                .setTitle("Nuevo proyecto")
+                .setMessage("El proyecto actual ya quedó guardado. Escribe un nombre para empezar uno nuevo.")
                 .setView(input)
                 .setNegativeButton("Cancelar", null)
-                .setPositiveButton("Guardar", (dialog, which) -> saveProject(input.getText().toString().trim()))
+                .setPositiveButton("Crear", (dialog, which) -> createNewProject(input.getText().toString().trim()))
                 .show();
     }
 
-    private void saveProject(String projectName) {
+    private void createNewProject(String projectName) {
         if (projectName.isEmpty()) {
             toast("Escribe un nombre para el proyecto.");
             return;
         }
-        if (textBox.getText().toString().trim().isEmpty()) {
-            toast("Escribe o carga un texto antes de guardar el proyecto.");
-            return;
-        }
-
         if (ProjectStore.exists(this, projectName)) {
             new AlertDialog.Builder(this)
-                    .setTitle("Proyecto existente")
-                    .setMessage("Ya existe un proyecto llamado ‘" + projectName + "’. ¿Quieres reemplazarlo?")
+                    .setTitle("Ese proyecto ya existe")
+                    .setMessage("Elige otro nombre para no reemplazarlo por accidente.")
+                    .setPositiveButton("Elegir otro", (d,w) -> askNewProject())
                     .setNegativeButton("Cancelar", null)
-                    .setPositiveButton("Reemplazar", (dialog, which) -> writeProject(projectName))
                     .show();
             return;
         }
-        writeProject(projectName);
+
+        suppressAutoSave = true;
+        setCurrentProjectName(projectName);
+        textBox.setText("");
+        nameBox.setText("locucion");
+        speedBar.setProgress(50);
+        pitchBar.setProgress(50);
+        if (voiceBox.getAdapter() != null && voiceBox.getAdapter().getCount() > 0) voiceBox.setSelection(0);
+        savedAudio = null;
+        pendingAudioFile = null;
+        pendingAudioName = "locucion.wav";
+        hasGeneratedOnce = false;
+        sessionId = "";
+        playBtn.setEnabled(false);
+        saveBtn.setEnabled(false);
+        shareBtn.setEnabled(false);
+        suppressAutoSave = false;
+        autoSaveState.setText("Guardando...");
+        saveCurrentProjectAsync(true);
+        status.setText("Proyecto nuevo listo. Empieza a escribir tu guion.");
     }
 
-    private void writeProject(String projectName) {
-        String text = textBox.getText().toString();
-        String audioName = nameBox.getText().toString().trim();
-        int voicePosition = voiceBox.getSelectedItemPosition();
+    private ProjectSnapshot captureProjectSnapshot() {
+        int voicePosition = voiceBox == null ? 0 : voiceBox.getSelectedItemPosition();
         String voiceLabel = (voicePosition >= 0 && voicePosition < voiceLabels.size())
                 ? voiceLabels.get(voicePosition) : "Voz predeterminada · Español México";
         String voiceName = (voicePosition > 0 && voicePosition - 1 < voices.size())
                 ? voices.get(voicePosition - 1).getName() : "";
-        int speed = speedBar.getProgress();
-        int pitch = pitchBar.getProgress();
+        return new ProjectSnapshot(
+                currentProjectName,
+                textBox == null ? "" : textBox.getText().toString(),
+                nameBox == null ? "locucion" : nameBox.getText().toString().trim(),
+                voiceName,
+                voiceLabel,
+                speedBar == null ? 50 : speedBar.getProgress(),
+                pitchBar == null ? 50 : pitchBar.getProgress());
+    }
 
-        status.setText("Guardando proyecto...");
-        new Thread(() -> {
+    private void scheduleProjectSave(long delayMs) {
+        if (suppressAutoSave || textBox == null || nameBox == null) return;
+        if (projectSaveRunnable != null) projectSaveHandler.removeCallbacks(projectSaveRunnable);
+        if (autoSaveState != null) autoSaveState.setText("Cambios pendientes...");
+        projectSaveRunnable = () -> saveCurrentProjectAsync(false);
+        projectSaveHandler.postDelayed(projectSaveRunnable, delayMs);
+    }
+
+    private void saveCurrentProjectAsync(boolean announce) {
+        if (suppressAutoSave || textBox == null || nameBox == null) return;
+        if (projectSaveRunnable != null) projectSaveHandler.removeCallbacks(projectSaveRunnable);
+        ProjectSnapshot snapshot = captureProjectSnapshot();
+        projectExecutor.execute(() -> {
             try {
-                ProjectStore.save(this, projectName, text, audioName, voiceName, voiceLabel, speed, pitch);
-                runOnUiThread(() -> status.setText("✅ Proyecto ‘" + projectName + "’ guardado."));
+                ProjectStore.save(this, snapshot.projectName, snapshot.text, snapshot.audioName,
+                        snapshot.voiceName, snapshot.voiceLabel, snapshot.speed, snapshot.pitch);
+                runOnUiThread(() -> {
+                    if (snapshot.projectName.equals(currentProjectName)) {
+                        autoSaveState.setText("✓ Guardado automático");
+                        if (announce) status.setText("✅ Proyecto ‘" + snapshot.projectName + "’ guardado.");
+                    }
+                });
             } catch (Exception e) {
-                runOnUiThread(() -> status.setText("No se pudo guardar el proyecto: " + e.getMessage()));
+                runOnUiThread(() -> {
+                    if (snapshot.projectName.equals(currentProjectName)) {
+                        autoSaveState.setText("No se pudo guardar");
+                        status.setText("No se pudo guardar el proyecto: " + e.getMessage());
+                    }
+                });
             }
-        }).start();
+        });
     }
 
     private void showProjects() {
+        saveCurrentProjectAsync(false);
         status.setText("Buscando proyectos guardados...");
-        new Thread(() -> {
+        projectExecutor.execute(() -> {
             try {
                 List<ProjectStore.Project> projects = ProjectStore.list(this);
                 runOnUiThread(() -> {
@@ -214,7 +414,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                         status.setText("Todavía no hay proyectos guardados.");
                         new AlertDialog.Builder(this)
                                 .setTitle("Mis proyectos")
-                                .setMessage("Todavía no tienes proyectos guardados. Usa ‘Guardar proyecto’ para crear el primero.")
+                                .setMessage("Todavía no tienes proyectos. Abre ☰ y toca ‘Nuevo proyecto’ para crear uno.")
                                 .setPositiveButton("Aceptar", null)
                                 .show();
                         return;
@@ -226,29 +426,32 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                     for (int i = 0; i < projects.size(); i++) {
                         ProjectStore.Project project = projects.get(i);
                         String date = formatter.format(new Date(project.updatedAt));
-                        items[i] = project.projectName + "\n" + countWords(project.text) + " palabras · " + date;
+                        String currentMark = project.projectName.equals(currentProjectName) ? " • actual" : "";
+                        items[i] = project.projectName + currentMark + "\n" + countWords(project.text) + " palabras · " + date;
                     }
 
                     status.setText(projects.size() == 1 ? "1 proyecto guardado." : projects.size() + " proyectos guardados.");
                     new AlertDialog.Builder(this)
                             .setTitle("📚 Mis proyectos")
-                            .setItems(items, (dialog, which) -> openProject(projects.get(which)))
+                            .setItems(items, (dialog, which) -> openProject(projects.get(which), true))
                             .setNegativeButton("Cerrar", null)
                             .show();
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> status.setText("No se pudieron leer los proyectos: " + e.getMessage()));
             }
-        }).start();
+        });
     }
 
-    private void openProject(ProjectStore.Project project) {
+    private void openProject(ProjectStore.Project project, boolean announce) {
+        suppressAutoSave = true;
         if (tts != null) tts.stop();
         if (player != null) {
             player.release();
             player = null;
         }
 
+        setCurrentProjectName(project.projectName);
         textBox.setText(project.text);
         nameBox.setText(project.audioName == null || project.audioName.trim().isEmpty() ? "locucion" : project.audioName);
         speedBar.setProgress(project.speedProgress);
@@ -268,8 +471,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         } else {
             selectSavedVoice(project.voiceName, project.voiceLabel);
         }
-
-        status.setText("✅ Proyecto ‘" + project.projectName + "’ abierto. Pulsa Generar audio cuando quieras escucharlo.");
+        suppressAutoSave = false;
+        autoSaveState.setText("✓ Guardado automático");
+        if (announce) status.setText("✅ Proyecto ‘" + project.projectName + "’ abierto. Pulsa Generar audio cuando quieras escucharlo.");
     }
 
     private void selectSavedVoice(String voiceName, String voiceLabel) {
@@ -304,6 +508,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             }
 
             @Override public void onStopTrackingTouch(SeekBar seekBar) {
+                scheduleProjectSave(350);
                 scheduleAutomaticRegeneration();
             }
         });
@@ -323,7 +528,12 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     private TextView label(String s, int size) {
-        TextView v = new TextView(this); v.setText(s); v.setTextSize(size); v.setTextColor(Color.rgb(31,41,55)); v.setPadding(0,dp(8),0,dp(6)); return v;
+        TextView v = new TextView(this);
+        v.setText(s);
+        v.setTextSize(size);
+        v.setTextColor(Color.rgb(31,41,55));
+        v.setPadding(0,dp(8),0,dp(6));
+        return v;
     }
 
     @Override public void onInit(int result) {
@@ -347,14 +557,17 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         voiceBox.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 if (position >= 0 && position < voiceLabels.size()) status.setText("Voz seleccionada: " + voiceLabels.get(position));
+                scheduleProjectSave(400);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
 
         if (pendingVoiceName != null || pendingVoiceLabel != null) {
+            suppressAutoSave = true;
             selectSavedVoice(pendingVoiceName, pendingVoiceLabel);
             pendingVoiceName = null;
             pendingVoiceLabel = null;
+            suppressAutoSave = false;
         }
 
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
@@ -362,9 +575,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             @Override public void onDone(String id) {
                 if (sessionId.isEmpty() || !id.startsWith(sessionId)) return;
                 partIndex++;
-                if (partIndex < chunks.size()) runOnUiThread(() -> synthesizePart());
+                if (partIndex < chunks.size()) runOnUiThread(this::continueSynthesis);
                 else new Thread(() -> finishAudio()).start();
             }
+            private void continueSynthesis() { synthesizePart(); }
             @Override public void onError(String id) { fail("Falló la síntesis de voz."); }
             @Override public void onError(String id, int code) { fail("Error TTS: "+code); }
         });
@@ -405,7 +619,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     private void pickFile() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        i.addCategory(Intent.CATEGORY_OPENABLE); i.setType("*/*");
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
         i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"text/plain","application/pdf","application/vnd.openxmlformats-officedocument.wordprocessingml.document"});
         startActivityForResult(i,PICK_FILE);
     }
@@ -426,19 +641,24 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 generateBtn.setEnabled(true);
                 playBtn.setEnabled(pendingAudioFile != null && pendingAudioFile.exists());
                 saveBtn.setEnabled(pendingAudioFile != null && pendingAudioFile.exists());
-                status.setText("No se guardó, pero el audio sigue disponible para escucharlo.");
+                status.setText("No se guardó el audio, pero el proyecto sí quedó guardado y el audio sigue disponible para escucharlo.");
                 return;
             }
             Uri destination = data.getData();
-            progress.setVisibility(View.VISIBLE); status.setText("Guardando audio...");
+            progress.setVisibility(View.VISIBLE);
+            status.setText("Guardando audio...");
             new Thread(() -> {
                 try {
                     copyToUri(pendingAudioFile, destination);
                     savedAudio = destination;
                     runOnUiThread(() -> {
-                        progress.setVisibility(View.GONE); generateBtn.setEnabled(true);
-                        playBtn.setEnabled(true); saveBtn.setEnabled(false); shareBtn.setEnabled(true);
-                        status.setText("✅ Audio guardado correctamente.");
+                        saveCurrentProjectAsync(false);
+                        progress.setVisibility(View.GONE);
+                        generateBtn.setEnabled(true);
+                        playBtn.setEnabled(true);
+                        saveBtn.setEnabled(false);
+                        shareBtn.setEnabled(true);
+                        status.setText("✅ Audio guardado. El proyecto sigue activo y actualizado.");
                     });
                 } catch (Exception e) { fail("No se pudo guardar el audio: " + e.getMessage()); }
             }).start();
@@ -446,18 +666,35 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         }
 
         if (req!=PICK_FILE || res!=RESULT_OK || data==null || data.getData()==null) return;
-        Uri uri=data.getData(); progress.setVisibility(View.VISIBLE); status.setText("Leyendo archivo...");
+        Uri uri=data.getData();
+        progress.setVisibility(View.VISIBLE);
+        status.setText("Leyendo archivo...");
         new Thread(() -> {
             try {
-                String name=fileName(uri); String mime=getContentResolver().getType(uri);
+                String name=fileName(uri);
+                String mime=getContentResolver().getType(uri);
                 String text=DocumentReader.read(getContentResolver(),uri,name,mime);
-                runOnUiThread(() -> { progress.setVisibility(View.GONE); textBox.setText(text); status.setText(text.isEmpty()?"No pude extraer texto; un PDF escaneado necesita OCR.":"Archivo cargado: "+countWords(text)+" palabras."); });
-            } catch(Exception e) { runOnUiThread(() -> { progress.setVisibility(View.GONE); status.setText("Error al leer archivo: "+e.getMessage()); }); }
+                runOnUiThread(() -> {
+                    progress.setVisibility(View.GONE);
+                    textBox.setText(text);
+                    status.setText(text.isEmpty()?"No pude extraer texto; un PDF escaneado necesita OCR.":"Archivo cargado: "+countWords(text)+" palabras.");
+                });
+            } catch(Exception e) {
+                runOnUiThread(() -> {
+                    progress.setVisibility(View.GONE);
+                    status.setText("Error al leer archivo: "+e.getMessage());
+                });
+            }
         }).start();
     }
 
     private String fileName(Uri uri) {
-        try(Cursor c=getContentResolver().query(uri,null,null,null,null)) { if(c!=null&&c.moveToFirst()){int i=c.getColumnIndex(OpenableColumns.DISPLAY_NAME); if(i>=0)return c.getString(i);} }
+        try(Cursor c=getContentResolver().query(uri,null,null,null,null)) {
+            if(c!=null&&c.moveToFirst()){
+                int i=c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if(i>=0)return c.getString(i);
+            }
+        }
         return "archivo";
     }
 
@@ -467,6 +704,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         String text=DocumentReader.clean(textBox.getText().toString());
         if(text.isEmpty()){toast("Escribe texto o abre un archivo.");return;}
 
+        saveCurrentProjectAsync(false);
         if (tts != null) tts.stop();
         if (player != null) { player.release(); player = null; }
 
@@ -477,10 +715,21 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         tts.setSpeechRate(0.5f+speedBar.getProgress()/100f);
         tts.setPitch(0.5f+pitchBar.getProgress()/100f);
         chunks=TextChunks.split(text, Math.min(3400,TextToSpeech.getMaxSpeechInputLength()-200));
-        parts.clear(); partIndex=0; sessionId=UUID.randomUUID().toString(); savedAudio=null; pendingAudioFile=null;
-        File dir=new File(getCacheDir(),"tts_parts"); dir.mkdirs(); File[] old=dir.listFiles(); if(old!=null)for(File f:old)f.delete();
+        parts.clear();
+        partIndex=0;
+        sessionId=UUID.randomUUID().toString();
+        savedAudio=null;
+        pendingAudioFile=null;
+        File dir=new File(getCacheDir(),"tts_parts");
+        dir.mkdirs();
+        File[] old=dir.listFiles();
+        if(old!=null)for(File f:old)f.delete();
         for(int i=0;i<chunks.size();i++) parts.add(new File(dir,String.format(Locale.US,"part_%03d.wav",i)));
-        generateBtn.setEnabled(false); playBtn.setEnabled(false); saveBtn.setEnabled(false); shareBtn.setEnabled(false); progress.setVisibility(View.VISIBLE);
+        generateBtn.setEnabled(false);
+        playBtn.setEnabled(false);
+        saveBtn.setEnabled(false);
+        shareBtn.setEnabled(false);
+        progress.setVisibility(View.VISIBLE);
         status.setText(automatic ? "Actualizando audio automáticamente..." : "Preparando audio...");
         synthesizePart();
     }
@@ -493,33 +742,50 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     private void finishAudio() {
         try {
-            File merged=new File(getCacheDir(),"locutor_final.wav"); WavMerger.merge(parts,merged);
-            String base=nameBox.getText().toString().trim().replaceAll("[\\\\/:*?\"<>|]+","_"); if(base.isEmpty())base="locucion";
+            File merged=new File(getCacheDir(),"locutor_final.wav");
+            WavMerger.merge(parts,merged);
+            String base=nameBox.getText().toString().trim().replaceAll("[\\\\/:*?\"<>|]+","_");
+            if(base.isEmpty())base="locucion";
             pendingAudioFile = merged;
             pendingAudioName = base + ".wav";
             hasGeneratedOnce = true;
             runOnUiThread(() -> {
-                progress.setVisibility(View.GONE); generateBtn.setEnabled(true);
-                playBtn.setEnabled(true); saveBtn.setEnabled(true); shareBtn.setEnabled(false);
+                progress.setVisibility(View.GONE);
+                generateBtn.setEnabled(true);
+                playBtn.setEnabled(true);
+                saveBtn.setEnabled(true);
+                shareBtn.setEnabled(false);
                 status.setText("✅ Audio actualizado. Puedes escucharlo o guardarlo.");
             });
         } catch(Exception e){ fail("No se pudo preparar el audio: "+e.getMessage()); }
     }
 
     private void saveAudio() {
-        if (pendingAudioFile == null || !pendingAudioFile.exists()) { toast("Primero genera un audio."); return; }
-        progress.setVisibility(View.VISIBLE); saveBtn.setEnabled(false); status.setText("Guardando audio...");
+        if (pendingAudioFile == null || !pendingAudioFile.exists()) {
+            toast("Primero genera un audio.");
+            return;
+        }
+        saveCurrentProjectAsync(false);
+        progress.setVisibility(View.VISIBLE);
+        saveBtn.setEnabled(false);
+        status.setText("Guardando audio...");
         new Thread(() -> {
             try {
                 savedAudio = saveDownload(pendingAudioFile, pendingAudioName);
                 runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE); saveBtn.setEnabled(false); shareBtn.setEnabled(true); playBtn.setEnabled(true);
-                    status.setText("✅ Guardado en Descargas/LocutorTTS");
+                    saveCurrentProjectAsync(false);
+                    progress.setVisibility(View.GONE);
+                    saveBtn.setEnabled(false);
+                    shareBtn.setEnabled(true);
+                    playBtn.setEnabled(true);
+                    status.setText("✅ Audio guardado en Descargas/LocutorTTS. El proyecto sigue activo y actualizado.");
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE); saveBtn.setEnabled(true); playBtn.setEnabled(true);
-                    status.setText("Tu Android necesita que elijas dónde guardar el audio.");
+                    progress.setVisibility(View.GONE);
+                    saveBtn.setEnabled(true);
+                    playBtn.setEnabled(true);
+                    status.setText("Tu Android necesita que elijas dónde guardar el audio. El proyecto ya quedó guardado.");
                     askWhereToSave();
                 });
             }
@@ -527,46 +793,96 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     }
 
     private Uri saveDownload(File source,String name) throws Exception {
-        ContentResolver r=getContentResolver(); ContentValues v=new ContentValues();
-        v.put(MediaStore.MediaColumns.DISPLAY_NAME,name); v.put(MediaStore.MediaColumns.MIME_TYPE,"audio/wav"); v.put(MediaStore.MediaColumns.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS+"/LocutorTTS"); v.put(MediaStore.MediaColumns.IS_PENDING,1);
-        Uri uri=r.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,v); if(uri==null)throw new Exception("Android no pudo crear el archivo.");
-        try(InputStream in=new FileInputStream(source); OutputStream out=r.openOutputStream(uri)){ if(out==null)throw new Exception("Android no abrió el archivo de destino."); byte[] b=new byte[16384];int n;while((n=in.read(b))>0)out.write(b,0,n);} catch(Exception e){r.delete(uri,null,null);throw e;}
-        v.clear();v.put(MediaStore.MediaColumns.IS_PENDING,0);r.update(uri,v,null,null);return uri;
+        ContentResolver r=getContentResolver();
+        ContentValues v=new ContentValues();
+        v.put(MediaStore.MediaColumns.DISPLAY_NAME,name);
+        v.put(MediaStore.MediaColumns.MIME_TYPE,"audio/wav");
+        v.put(MediaStore.MediaColumns.RELATIVE_PATH,Environment.DIRECTORY_DOWNLOADS+"/LocutorTTS");
+        v.put(MediaStore.MediaColumns.IS_PENDING,1);
+        Uri uri=r.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,v);
+        if(uri==null)throw new Exception("Android no pudo crear el archivo.");
+        try(InputStream in=new FileInputStream(source); OutputStream out=r.openOutputStream(uri)){
+            if(out==null)throw new Exception("Android no abrió el archivo de destino.");
+            byte[] b=new byte[16384];
+            int n;
+            while((n=in.read(b))>0)out.write(b,0,n);
+        } catch(Exception e){
+            r.delete(uri,null,null);
+            throw e;
+        }
+        v.clear();
+        v.put(MediaStore.MediaColumns.IS_PENDING,0);
+        r.update(uri,v,null,null);
+        return uri;
     }
 
     private void copyToUri(File source, Uri destination) throws Exception {
         ContentResolver r = getContentResolver();
         try (InputStream in = new FileInputStream(source); OutputStream out = r.openOutputStream(destination, "w")) {
             if (out == null) throw new Exception("No se pudo abrir la ubicación seleccionada.");
-            byte[] b = new byte[16384]; int n; while ((n = in.read(b)) > 0) out.write(b, 0, n); out.flush();
+            byte[] b = new byte[16384];
+            int n;
+            while ((n = in.read(b)) > 0) out.write(b, 0, n);
+            out.flush();
         }
     }
 
     private void play(){
         try {
             if(player!=null){player.release();player=null;}
-            if(savedAudio!=null){ player=MediaPlayer.create(this,savedAudio); }
-            else if(pendingAudioFile!=null && pendingAudioFile.exists()){
-                player=new MediaPlayer(); player.setDataSource(pendingAudioFile.getAbsolutePath()); player.prepare();
+            if(savedAudio!=null){
+                player=MediaPlayer.create(this,savedAudio);
+            } else if(pendingAudioFile!=null && pendingAudioFile.exists()){
+                player=new MediaPlayer();
+                player.setDataSource(pendingAudioFile.getAbsolutePath());
+                player.prepare();
             }
-            if(player!=null) player.start(); else toast("No pude abrir el audio.");
+            if(player!=null) player.start();
+            else toast("No pude abrir el audio.");
         } catch(Exception e){ toast("No se pudo reproducir: "+e.getMessage()); }
     }
 
     private void share(){
         if(savedAudio==null){toast("Guarda el audio antes de compartirlo.");return;}
-        Intent i=new Intent(Intent.ACTION_SEND);i.setType("audio/wav");i.putExtra(Intent.EXTRA_STREAM,savedAudio);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(Intent.createChooser(i,"Compartir audio"));
+        Intent i=new Intent(Intent.ACTION_SEND);
+        i.setType("audio/wav");
+        i.putExtra(Intent.EXTRA_STREAM,savedAudio);
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivity(Intent.createChooser(i,"Compartir audio"));
     }
 
-    private void fail(String s){runOnUiThread(() -> {progress.setVisibility(View.GONE);generateBtn.setEnabled(true);status.setText(s);});}
+    private void fail(String s){
+        runOnUiThread(() -> {
+            progress.setVisibility(View.GONE);
+            generateBtn.setEnabled(true);
+            status.setText(s);
+        });
+    }
+
     private int countWords(String s){return s.trim().isEmpty()?0:s.trim().split("\\s+").length;}
     private int dp(int x){return Math.round(x*getResources().getDisplayMetrics().density);}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
 
+    @Override protected void onPause() {
+        if (projectSaveRunnable != null) projectSaveHandler.removeCallbacks(projectSaveRunnable);
+        saveCurrentProjectAsync(false);
+        super.onPause();
+    }
+
+    @Override @SuppressWarnings("deprecation") public void onBackPressed() {
+        if (drawerOpen) {
+            closeDrawer();
+            return;
+        }
+        super.onBackPressed();
+    }
+
     @Override protected void onDestroy(){
         if(autoUpdateRunnable!=null) autoUpdateHandler.removeCallbacks(autoUpdateRunnable);
+        if(projectSaveRunnable!=null) projectSaveHandler.removeCallbacks(projectSaveRunnable);
         if(player!=null)player.release();
         if(tts!=null){tts.stop();tts.shutdown();}
+        projectExecutor.shutdown();
         super.onDestroy();
     }
 }
