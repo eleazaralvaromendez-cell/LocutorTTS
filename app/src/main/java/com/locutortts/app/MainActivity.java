@@ -40,6 +40,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     private TextToSpeech tts;
     private final List<Voice> voices = new ArrayList<>();
+    private final List<String> voiceLabels = new ArrayList<>();
     private List<String> chunks = Collections.emptyList();
     private final List<File> parts = new ArrayList<>();
     private int partIndex;
@@ -122,9 +123,25 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         voices.clear();
         if (tts.getVoices() != null) for (Voice v: tts.getVoices()) if ("es".equals(v.getLocale().getLanguage())) voices.add(v);
         voices.sort(Comparator.comparing(v -> v.getLocale().toLanguageTag()+v.getName()));
-        List<String> names = new ArrayList<>(); names.add("Voz predeterminada");
-        for (Voice v: voices) names.add(v.getLocale().toLanguageTag()+" · "+v.getName()+(v.isNetworkConnectionRequired()?" · internet":" · local"));
-        voiceBox.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, names));
+
+        voiceLabels.clear();
+        voiceLabels.add("Voz predeterminada · Español México");
+        Map<String,Integer> regionCounts = new HashMap<>();
+        for (Voice v: voices) {
+            String region = voiceRegionName(v.getLocale());
+            int n = regionCounts.getOrDefault(region, 0) + 1;
+            regionCounts.put(region, n);
+            String mode = v.isNetworkConnectionRequired() ? "online" : "sin internet";
+            voiceLabels.add("Voz " + region + " " + n + " · " + mode);
+        }
+        voiceBox.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, voiceLabels));
+        voiceBox.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (position >= 0 && position < voiceLabels.size()) status.setText("Voz seleccionada: " + voiceLabels.get(position));
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
             @Override public void onStart(String id) {}
             @Override public void onDone(String id) {
@@ -136,7 +153,39 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             @Override public void onError(String id) { fail("Falló la síntesis de voz."); }
             @Override public void onError(String id, int code) { fail("Error TTS: "+code); }
         });
-        status.setText("Listo.");
+    }
+
+    private String voiceRegionName(Locale locale) {
+        String country = locale == null ? "" : locale.getCountry();
+        switch (country) {
+            case "MX": return "México";
+            case "ES": return "España";
+            case "US": return "Latina";
+            case "AR": return "Argentina";
+            case "CO": return "Colombia";
+            case "CL": return "Chile";
+            case "PE": return "Perú";
+            case "VE": return "Venezuela";
+            case "UY": return "Uruguay";
+            case "EC": return "Ecuador";
+            case "GT": return "Guatemala";
+            case "CR": return "Costa Rica";
+            case "DO": return "Rep. Dominicana";
+            case "PR": return "Puerto Rico";
+            case "BO": return "Bolivia";
+            case "PY": return "Paraguay";
+            case "HN": return "Honduras";
+            case "SV": return "El Salvador";
+            case "NI": return "Nicaragua";
+            case "PA": return "Panamá";
+            case "CU": return "Cuba";
+            default:
+                if (locale != null && !country.isEmpty()) {
+                    String display = locale.getDisplayCountry(new Locale("es"));
+                    if (display != null && !display.trim().isEmpty()) return display;
+                }
+                return "Español";
+        }
     }
 
     private void pickFile() {
