@@ -28,6 +28,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.text.DateFormat;
 import java.util.*;
 
 public class MainActivity extends Activity implements TextToSpeech.OnInitListener {
@@ -56,6 +57,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private final Handler autoUpdateHandler = new Handler(Looper.getMainLooper());
     private Runnable autoUpdateRunnable;
     private boolean hasGeneratedOnce = false;
+    private String pendingVoiceName;
+    private String pendingVoiceLabel;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -95,10 +98,16 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         tp.setMargins(0,dp(10),0,dp(10));
         root.addView(textBox,tp);
 
+        LinearLayout projectActions = new LinearLayout(this);
         Button saveProject = new Button(this);
-        saveProject.setText("📁 GUARDAR PROYECTO");
+        saveProject.setText("💾 Guardar proyecto");
         saveProject.setOnClickListener(v -> askProjectName());
-        root.addView(saveProject);
+        Button myProjects = new Button(this);
+        myProjects.setText("📚 Mis proyectos");
+        myProjects.setOnClickListener(v -> showProjects());
+        projectActions.addView(saveProject, new LinearLayout.LayoutParams(0,-2,1));
+        projectActions.addView(myProjects, new LinearLayout.LayoutParams(0,-2,1));
+        root.addView(projectActions);
 
         root.addView(label("Voz",16));
         voiceBox = new Spinner(this); root.addView(voiceBox);
@@ -195,6 +204,93 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         }).start();
     }
 
+    private void showProjects() {
+        status.setText("Buscando proyectos guardados...");
+        new Thread(() -> {
+            try {
+                List<ProjectStore.Project> projects = ProjectStore.list(this);
+                runOnUiThread(() -> {
+                    if (projects.isEmpty()) {
+                        status.setText("Todavía no hay proyectos guardados.");
+                        new AlertDialog.Builder(this)
+                                .setTitle("Mis proyectos")
+                                .setMessage("Todavía no tienes proyectos guardados. Usa ‘Guardar proyecto’ para crear el primero.")
+                                .setPositiveButton("Aceptar", null)
+                                .show();
+                        return;
+                    }
+
+                    DateFormat formatter = DateFormat.getDateTimeInstance(
+                            DateFormat.SHORT, DateFormat.SHORT, new Locale("es", "MX"));
+                    String[] items = new String[projects.size()];
+                    for (int i = 0; i < projects.size(); i++) {
+                        ProjectStore.Project project = projects.get(i);
+                        String date = formatter.format(new Date(project.updatedAt));
+                        items[i] = project.projectName + "\n" + countWords(project.text) + " palabras · " + date;
+                    }
+
+                    status.setText(projects.size() == 1 ? "1 proyecto guardado." : projects.size() + " proyectos guardados.");
+                    new AlertDialog.Builder(this)
+                            .setTitle("📚 Mis proyectos")
+                            .setItems(items, (dialog, which) -> openProject(projects.get(which)))
+                            .setNegativeButton("Cerrar", null)
+                            .show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> status.setText("No se pudieron leer los proyectos: " + e.getMessage()));
+            }
+        }).start();
+    }
+
+    private void openProject(ProjectStore.Project project) {
+        if (tts != null) tts.stop();
+        if (player != null) {
+            player.release();
+            player = null;
+        }
+
+        textBox.setText(project.text);
+        nameBox.setText(project.audioName == null || project.audioName.trim().isEmpty() ? "locucion" : project.audioName);
+        speedBar.setProgress(project.speedProgress);
+        pitchBar.setProgress(project.pitchProgress);
+
+        savedAudio = null;
+        pendingAudioFile = null;
+        hasGeneratedOnce = false;
+        sessionId = "";
+        playBtn.setEnabled(false);
+        saveBtn.setEnabled(false);
+        shareBtn.setEnabled(false);
+
+        if (voiceLabels.isEmpty()) {
+            pendingVoiceName = project.voiceName;
+            pendingVoiceLabel = project.voiceLabel;
+        } else {
+            selectSavedVoice(project.voiceName, project.voiceLabel);
+        }
+
+        status.setText("✅ Proyecto ‘" + project.projectName + "’ abierto. Pulsa Generar audio cuando quieras escucharlo.");
+    }
+
+    private void selectSavedVoice(String voiceName, String voiceLabel) {
+        int selected = 0;
+        if (voiceName != null && !voiceName.isEmpty()) {
+            for (int i = 0; i < voices.size(); i++) {
+                if (voiceName.equals(voices.get(i).getName())) {
+                    selected = i + 1;
+                    break;
+                }
+            }
+        }
+        if (selected == 0 && voiceLabel != null && !voiceLabel.isEmpty()) {
+            int labelIndex = voiceLabels.indexOf(voiceLabel);
+            if (labelIndex >= 0) selected = labelIndex;
+        }
+        if (voiceBox.getAdapter() != null && selected < voiceBox.getAdapter().getCount()) {
+            voiceBox.setSelection(selected);
+        }
+    }
+
     private void setupAutoSlider(SeekBar bar, boolean speed) {
         bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progressValue, boolean fromUser) {
@@ -255,10 +351,16 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
 
+        if (pendingVoiceName != null || pendingVoiceLabel != null) {
+            selectSavedVoice(pendingVoiceName, pendingVoiceLabel);
+            pendingVoiceName = null;
+            pendingVoiceLabel = null;
+        }
+
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
             @Override public void onStart(String id) {}
             @Override public void onDone(String id) {
-                if (!id.startsWith(sessionId)) return;
+                if (sessionId.isEmpty() || !id.startsWith(sessionId)) return;
                 partIndex++;
                 if (partIndex < chunks.size()) runOnUiThread(() -> synthesizePart());
                 else new Thread(() -> finishAudio()).start();
