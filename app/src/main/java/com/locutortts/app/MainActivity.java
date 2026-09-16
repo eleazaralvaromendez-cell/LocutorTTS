@@ -52,6 +52,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private LinearLayout drawer;
     private View drawerScrim;
     private boolean drawerOpen = false;
+    private Button drawerProjectsButton;
+    private ScrollView drawerProjectsScroll;
+    private LinearLayout drawerProjectsContainer;
+    private boolean drawerProjectsExpanded = false;
 
     private TextToSpeech tts;
     private final List<Voice> voices = new ArrayList<>();
@@ -236,19 +240,98 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         newProject.setOnClickListener(v -> askNewProject());
         drawer.addView(newProject, new LinearLayout.LayoutParams(-1, dp(56)));
 
-        Button projects = new Button(this);
-        projects.setText("📚 Mis proyectos");
-        projects.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        projects.setOnClickListener(v -> {
-            closeDrawer();
-            showProjects();
-        });
-        drawer.addView(projects, new LinearLayout.LayoutParams(-1, dp(56)));
+        drawerProjectsButton = new Button(this);
+        drawerProjectsButton.setText("📚 Proyectos  ▸");
+        drawerProjectsButton.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        drawerProjectsButton.setOnClickListener(v -> toggleDrawerProjects());
+        drawer.addView(drawerProjectsButton, new LinearLayout.LayoutParams(-1, dp(56)));
+
+        drawerProjectsScroll = new ScrollView(this);
+        drawerProjectsScroll.setVisibility(View.GONE);
+        drawerProjectsScroll.setFillViewport(true);
+        drawerProjectsContainer = new LinearLayout(this);
+        drawerProjectsContainer.setOrientation(LinearLayout.VERTICAL);
+        drawerProjectsContainer.setPadding(dp(8), 0, 0, dp(6));
+        drawerProjectsScroll.addView(drawerProjectsContainer, new ScrollView.LayoutParams(-1, -2));
+        drawer.addView(drawerProjectsScroll, new LinearLayout.LayoutParams(-1, dp(120)));
 
         int screenWidth = getResources().getDisplayMetrics().widthPixels;
         int drawerWidth = Math.min(dp(300), (int)(screenWidth * 0.86f));
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(drawerWidth, -1, Gravity.START);
         appFrame.addView(drawer, params);
+    }
+
+    private void toggleDrawerProjects() {
+        drawerProjectsExpanded = !drawerProjectsExpanded;
+        if (!drawerProjectsExpanded) {
+            drawerProjectsButton.setText("📚 Proyectos  ▸");
+            drawerProjectsScroll.setVisibility(View.GONE);
+            return;
+        }
+
+        drawerProjectsButton.setText("📚 Proyectos  ▾");
+        drawerProjectsScroll.setVisibility(View.VISIBLE);
+        loadDrawerProjects();
+    }
+
+    private void loadDrawerProjects() {
+        saveCurrentProjectAsync(false);
+        drawerProjectsContainer.removeAllViews();
+        TextView loading = label("Cargando proyectos...", 13);
+        loading.setTextColor(Color.GRAY);
+        drawerProjectsContainer.addView(loading);
+
+        projectExecutor.execute(() -> {
+            try {
+                List<ProjectStore.Project> projects = ProjectStore.list(this);
+                runOnUiThread(() -> {
+                    drawerProjectsContainer.removeAllViews();
+                    if (projects.isEmpty()) {
+                        TextView empty = label("Aún no hay proyectos.", 13);
+                        empty.setTextColor(Color.GRAY);
+                        drawerProjectsContainer.addView(empty);
+                        LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) drawerProjectsScroll.getLayoutParams();
+                        params.height = dp(58);
+                        drawerProjectsScroll.setLayoutParams(params);
+                        return;
+                    }
+
+                    DateFormat formatter = DateFormat.getDateTimeInstance(
+                            DateFormat.SHORT, DateFormat.SHORT, new Locale("es", "MX"));
+                    for (ProjectStore.Project project : projects) {
+                        Button projectButton = new Button(this);
+                        String currentMark = project.projectName.equals(currentProjectName) ? "● " : "";
+                        String date = formatter.format(new Date(project.updatedAt));
+                        projectButton.setText(currentMark + project.projectName + "\n" + countWords(project.text) + " palabras · " + date);
+                        projectButton.setAllCaps(false);
+                        projectButton.setTextSize(13);
+                        projectButton.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                        projectButton.setPadding(dp(12), dp(5), dp(8), dp(5));
+                        projectButton.setOnClickListener(v -> {
+                            openProject(project, true);
+                            drawerProjectsExpanded = false;
+                            drawerProjectsButton.setText("📚 Proyectos  ▸");
+                            drawerProjectsScroll.setVisibility(View.GONE);
+                            closeDrawer();
+                        });
+                        drawerProjectsContainer.addView(projectButton, new LinearLayout.LayoutParams(-1, dp(60)));
+                    }
+
+                    int visibleItems = Math.min(projects.size(), 4);
+                    int wantedHeight = dp(60 * visibleItems + 8);
+                    LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) drawerProjectsScroll.getLayoutParams();
+                    params.height = wantedHeight;
+                    drawerProjectsScroll.setLayoutParams(params);
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    drawerProjectsContainer.removeAllViews();
+                    TextView error = label("No pude cargar los proyectos.", 13);
+                    error.setTextColor(Color.RED);
+                    drawerProjectsContainer.addView(error);
+                });
+            }
+        });
     }
 
     private void openDrawer() {
@@ -412,30 +495,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 runOnUiThread(() -> {
                     if (projects.isEmpty()) {
                         status.setText("Todavía no hay proyectos guardados.");
-                        new AlertDialog.Builder(this)
-                                .setTitle("Mis proyectos")
-                                .setMessage("Todavía no tienes proyectos. Abre ☰ y toca ‘Nuevo proyecto’ para crear uno.")
-                                .setPositiveButton("Aceptar", null)
-                                .show();
                         return;
                     }
-
-                    DateFormat formatter = DateFormat.getDateTimeInstance(
-                            DateFormat.SHORT, DateFormat.SHORT, new Locale("es", "MX"));
-                    String[] items = new String[projects.size()];
-                    for (int i = 0; i < projects.size(); i++) {
-                        ProjectStore.Project project = projects.get(i);
-                        String date = formatter.format(new Date(project.updatedAt));
-                        String currentMark = project.projectName.equals(currentProjectName) ? " • actual" : "";
-                        items[i] = project.projectName + currentMark + "\n" + countWords(project.text) + " palabras · " + date;
-                    }
-
                     status.setText(projects.size() == 1 ? "1 proyecto guardado." : projects.size() + " proyectos guardados.");
-                    new AlertDialog.Builder(this)
-                            .setTitle("📚 Mis proyectos")
-                            .setItems(items, (dialog, which) -> openProject(projects.get(which), true))
-                            .setNegativeButton("Cerrar", null)
-                            .show();
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> status.setText("No se pudieron leer los proyectos: " + e.getMessage()));
