@@ -36,7 +36,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private SeekBar speedBar, pitchBar;
     private TextView status;
     private ProgressBar progress;
-    private Button generateBtn, playBtn, shareBtn;
+    private Button generateBtn, playBtn, saveBtn, shareBtn;
 
     private TextToSpeech tts;
     private final List<Voice> voices = new ArrayList<>();
@@ -65,9 +65,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         root.setBackgroundColor(Color.rgb(248,250,252));
         scroll.addView(root);
 
-        TextView title = label("🎙️ Locutor TTS", 28);
-        root.addView(title);
-        TextView help = label("Escribe texto o abre PDF, Word (.docx) o TXT. La app intenta guardar en Descargas/LocutorTTS; si tu Android lo bloquea, te pedirá dónde guardar el audio.", 15);
+        root.addView(label("🎙️ Locutor TTS", 28));
+        TextView help = label("Genera el audio, escúchalo primero y guárdalo solamente cuando te guste.", 15);
         help.setTextColor(Color.DKGRAY);
         root.addView(help);
 
@@ -90,7 +89,6 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         root.addView(label("Voz",16));
         voiceBox = new Spinner(this); root.addView(voiceBox);
-
         root.addView(label("Velocidad",16));
         speedBar = new SeekBar(this); speedBar.setMax(150); speedBar.setProgress(50); root.addView(speedBar);
         root.addView(label("Tono",16));
@@ -100,6 +98,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         nameBox = new EditText(this); nameBox.setText("locucion"); nameBox.setSingleLine(); root.addView(nameBox);
 
         generateBtn = new Button(this); generateBtn.setText("🎧 GENERAR AUDIO"); generateBtn.setOnClickListener(v -> generate()); root.addView(generateBtn);
+        saveBtn = new Button(this); saveBtn.setText("💾 GUARDAR AUDIO"); saveBtn.setEnabled(false); saveBtn.setOnClickListener(v -> saveAudio()); root.addView(saveBtn);
+
         LinearLayout actions = new LinearLayout(this);
         playBtn = new Button(this); playBtn.setText("▶ Escuchar"); playBtn.setEnabled(false); playBtn.setOnClickListener(v -> play());
         shareBtn = new Button(this); shareBtn.setText("↗ Compartir"); shareBtn.setEnabled(false); shareBtn.setOnClickListener(v -> share());
@@ -156,32 +156,27 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
     @Override @SuppressWarnings("deprecation") protected void onActivityResult(int req,int res,Intent data) {
         super.onActivityResult(req,res,data);
-
         if (req == SAVE_AUDIO) {
             if (res != RESULT_OK || data == null || data.getData() == null) {
                 progress.setVisibility(View.GONE);
                 generateBtn.setEnabled(true);
-                status.setText("Audio generado, pero no se guardó porque se canceló la ubicación.");
+                playBtn.setEnabled(pendingAudioFile != null && pendingAudioFile.exists());
+                saveBtn.setEnabled(pendingAudioFile != null && pendingAudioFile.exists());
+                status.setText("No se guardó, pero el audio sigue disponible para escucharlo.");
                 return;
             }
-
             Uri destination = data.getData();
-            progress.setVisibility(View.VISIBLE);
-            status.setText("Guardando audio...");
+            progress.setVisibility(View.VISIBLE); status.setText("Guardando audio...");
             new Thread(() -> {
                 try {
                     copyToUri(pendingAudioFile, destination);
                     savedAudio = destination;
                     runOnUiThread(() -> {
-                        progress.setVisibility(View.GONE);
-                        generateBtn.setEnabled(true);
-                        playBtn.setEnabled(true);
-                        shareBtn.setEnabled(true);
+                        progress.setVisibility(View.GONE); generateBtn.setEnabled(true);
+                        playBtn.setEnabled(true); saveBtn.setEnabled(false); shareBtn.setEnabled(true);
                         status.setText("✅ Audio guardado correctamente.");
                     });
-                } catch (Exception e) {
-                    fail("No se pudo guardar el audio: " + e.getMessage());
-                }
+                } catch (Exception e) { fail("No se pudo guardar el audio: " + e.getMessage()); }
             }).start();
             return;
         }
@@ -211,7 +206,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         parts.clear(); partIndex=0; sessionId=UUID.randomUUID().toString(); savedAudio=null; pendingAudioFile=null;
         File dir=new File(getCacheDir(),"tts_parts"); dir.mkdirs(); File[] old=dir.listFiles(); if(old!=null)for(File f:old)f.delete();
         for(int i=0;i<chunks.size();i++) parts.add(new File(dir,String.format(Locale.US,"part_%03d.wav",i)));
-        generateBtn.setEnabled(false); playBtn.setEnabled(false); shareBtn.setEnabled(false); progress.setVisibility(View.VISIBLE); synthesizePart();
+        generateBtn.setEnabled(false); playBtn.setEnabled(false); saveBtn.setEnabled(false); shareBtn.setEnabled(false); progress.setVisibility(View.VISIBLE); synthesizePart();
     }
 
     private void synthesizePart() {
@@ -226,25 +221,32 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             String base=nameBox.getText().toString().trim().replaceAll("[\\\\/:*?\"<>|]+","_"); if(base.isEmpty())base="locucion";
             pendingAudioFile = merged;
             pendingAudioName = base + ".wav";
+            runOnUiThread(() -> {
+                progress.setVisibility(View.GONE); generateBtn.setEnabled(true);
+                playBtn.setEnabled(true); saveBtn.setEnabled(true); shareBtn.setEnabled(false);
+                status.setText("✅ Audio generado. Escúchalo y, si te gusta, pulsa Guardar audio.");
+            });
+        } catch(Exception e){ fail("No se pudo preparar el audio: "+e.getMessage()); }
+    }
 
+    private void saveAudio() {
+        if (pendingAudioFile == null || !pendingAudioFile.exists()) { toast("Primero genera un audio."); return; }
+        progress.setVisibility(View.VISIBLE); saveBtn.setEnabled(false); status.setText("Guardando audio...");
+        new Thread(() -> {
             try {
-                savedAudio=saveDownload(merged,pendingAudioName);
+                savedAudio = saveDownload(pendingAudioFile, pendingAudioName);
                 runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE);
-                    generateBtn.setEnabled(true);
-                    playBtn.setEnabled(true);
-                    shareBtn.setEnabled(true);
+                    progress.setVisibility(View.GONE); saveBtn.setEnabled(false); shareBtn.setEnabled(true); playBtn.setEnabled(true);
                     status.setText("✅ Guardado en Descargas/LocutorTTS");
                 });
-            } catch (Exception directSaveError) {
+            } catch (Exception e) {
                 runOnUiThread(() -> {
-                    progress.setVisibility(View.GONE);
-                    generateBtn.setEnabled(true);
-                    status.setText("Tu Android bloqueó el guardado directo. Elige una ubicación para guardar el audio.");
+                    progress.setVisibility(View.GONE); saveBtn.setEnabled(true); playBtn.setEnabled(true);
+                    status.setText("Tu Android necesita que elijas dónde guardar el audio.");
                     askWhereToSave();
                 });
             }
-        } catch(Exception e){ fail("No se pudo preparar el audio: "+e.getMessage()); }
+        }).start();
     }
 
     private Uri saveDownload(File source,String name) throws Exception {
@@ -259,15 +261,26 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         ContentResolver r = getContentResolver();
         try (InputStream in = new FileInputStream(source); OutputStream out = r.openOutputStream(destination, "w")) {
             if (out == null) throw new Exception("No se pudo abrir la ubicación seleccionada.");
-            byte[] b = new byte[16384];
-            int n;
-            while ((n = in.read(b)) > 0) out.write(b, 0, n);
-            out.flush();
+            byte[] b = new byte[16384]; int n; while ((n = in.read(b)) > 0) out.write(b, 0, n); out.flush();
         }
     }
 
-    private void play(){ if(savedAudio==null)return; if(player!=null)player.release(); player=MediaPlayer.create(this,savedAudio); if(player!=null)player.start(); }
-    private void share(){ if(savedAudio==null)return; Intent i=new Intent(Intent.ACTION_SEND);i.setType("audio/wav");i.putExtra(Intent.EXTRA_STREAM,savedAudio);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(Intent.createChooser(i,"Compartir audio")); }
+    private void play(){
+        try {
+            if(player!=null){player.release();player=null;}
+            if(savedAudio!=null){ player=MediaPlayer.create(this,savedAudio); }
+            else if(pendingAudioFile!=null && pendingAudioFile.exists()){
+                player=new MediaPlayer(); player.setDataSource(pendingAudioFile.getAbsolutePath()); player.prepare();
+            }
+            if(player!=null) player.start(); else toast("No pude abrir el audio.");
+        } catch(Exception e){ toast("No se pudo reproducir: "+e.getMessage()); }
+    }
+
+    private void share(){
+        if(savedAudio==null){toast("Guarda el audio antes de compartirlo.");return;}
+        Intent i=new Intent(Intent.ACTION_SEND);i.setType("audio/wav");i.putExtra(Intent.EXTRA_STREAM,savedAudio);i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(Intent.createChooser(i,"Compartir audio"));
+    }
+
     private void fail(String s){runOnUiThread(() -> {progress.setVisibility(View.GONE);generateBtn.setEnabled(true);status.setText(s);});}
     private int countWords(String s){return s.trim().isEmpty()?0:s.trim().split("\\s+").length;}
     private int dp(int x){return Math.round(x*getResources().getDisplayMetrics().density);}
