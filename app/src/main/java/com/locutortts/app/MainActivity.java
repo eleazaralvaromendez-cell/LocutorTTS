@@ -151,7 +151,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         LinearLayout row = new LinearLayout(this);
         Button open = new Button(this); open.setText("📄 Abrir archivo"); open.setOnClickListener(v -> pickFile());
-        Button clear = new Button(this); clear.setText("Limpiar"); clear.setOnClickListener(v -> textBox.setText(""));
+        Button clear = new Button(this); clear.setText("Limpiar"); clear.setOnClickListener(v -> confirmClearText());
         row.addView(open, new LinearLayout.LayoutParams(0,-2,1));
         row.addView(clear, new LinearLayout.LayoutParams(0,-2,1));
         root.addView(row);
@@ -351,12 +351,108 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private void showProjectActions(ProjectStore.Project project) {
         new AlertDialog.Builder(this)
                 .setTitle(project.projectName)
-                .setItems(new String[]{"✏️ Renombrar", "🗑️ Eliminar"}, (dialog, which) -> {
+                .setItems(new String[]{"✏️ Renombrar", "🕘 Historial de versiones", "🗑️ Eliminar"}, (dialog, which) -> {
                     if (which == 0) askRenameProject(project);
+                    else if (which == 1) showProjectHistory(project);
                     else confirmDeleteProject(project);
                 })
                 .setNegativeButton("Cancelar", null)
                 .show();
+    }
+
+    private void showProjectHistory(ProjectStore.Project project) {
+        status.setText("Buscando versiones anteriores...");
+        projectExecutor.execute(() -> {
+            try {
+                List<ProjectHistory.Revision> revisions = ProjectHistory.list(this, project.projectName);
+                runOnUiThread(() -> {
+                    if (revisions.isEmpty()) {
+                        status.setText("Aún no hay versiones anteriores de ‘" + project.projectName + "’.");
+                        new AlertDialog.Builder(this)
+                                .setTitle("🕘 Historial de versiones")
+                                .setMessage("Todavía no hay puntos de recuperación. Se crearán automáticamente mientras trabajas y antes de limpiar el texto.")
+                                .setPositiveButton("Aceptar", null)
+                                .show();
+                        return;
+                    }
+
+                    DateFormat formatter = DateFormat.getDateTimeInstance(
+                            DateFormat.SHORT, DateFormat.SHORT, new Locale("es", "MX"));
+                    String[] items = new String[revisions.size()];
+                    for (int i = 0; i < revisions.size(); i++) {
+                        ProjectHistory.Revision revision = revisions.get(i);
+                        items[i] = formatter.format(new Date(revision.createdAt))
+                                + " · " + countWords(revision.text) + " palabras";
+                    }
+
+                    status.setText(revisions.size() == 1
+                            ? "1 versión disponible."
+                            : revisions.size() + " versiones disponibles.");
+                    new AlertDialog.Builder(this)
+                            .setTitle("🕘 " + project.projectName)
+                            .setItems(items, (dialog, which) -> confirmRestoreRevision(project, revisions.get(which)))
+                            .setNegativeButton("Cerrar", null)
+                            .show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> status.setText("No se pudo abrir el historial: " + e.getMessage()));
+            }
+        });
+    }
+
+    private void confirmRestoreRevision(ProjectStore.Project project, ProjectHistory.Revision revision) {
+        DateFormat formatter = DateFormat.getDateTimeInstance(
+                DateFormat.SHORT, DateFormat.SHORT, new Locale("es", "MX"));
+        new AlertDialog.Builder(this)
+                .setTitle("Restaurar versión")
+                .setMessage("¿Restaurar la versión del " + formatter.format(new Date(revision.createdAt))
+                        + "?\n\nEl estado actual se guardará primero, así podrás recuperarlo también.")
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Restaurar", (dialog, which) -> restoreProjectRevision(project, revision))
+                .show();
+    }
+
+    private void restoreProjectRevision(ProjectStore.Project project, ProjectHistory.Revision revision) {
+        boolean wasCurrent = project.projectName.equals(currentProjectName);
+        ProjectSnapshot currentSnapshot = wasCurrent ? captureProjectSnapshot() : null;
+        if (projectSaveRunnable != null) projectSaveHandler.removeCallbacks(projectSaveRunnable);
+        autoSaveState.setText("Restaurando versión...");
+
+        projectExecutor.execute(() -> {
+            try {
+                if (currentSnapshot != null) {
+                    ProjectHistory.captureIfNeeded(this,
+                            currentSnapshot.projectName,
+                            currentSnapshot.text,
+                            currentSnapshot.audioName,
+                            currentSnapshot.voiceName,
+                            currentSnapshot.voiceLabel,
+                            currentSnapshot.speed,
+                            currentSnapshot.pitch);
+                    ProjectStore.save(this,
+                            currentSnapshot.projectName,
+                            currentSnapshot.text,
+                            currentSnapshot.audioName,
+                            currentSnapshot.voiceName,
+                            currentSnapshot.voiceLabel,
+                            currentSnapshot.speed,
+                            currentSnapshot.pitch);
+                }
+
+                ProjectStore.Project restored = ProjectHistory.restore(this, project.projectName, revision);
+                runOnUiThread(() -> {
+                    if (wasCurrent) openProject(restored, false);
+                    autoSaveState.setText("✓ Guardado automático");
+                    status.setText("✅ Versión anterior restaurada. El estado que tenías antes también quedó en el historial.");
+                    if (drawerProjectsExpanded) loadDrawerProjects();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    autoSaveState.setText("No se pudo restaurar");
+                    status.setText("No se pudo restaurar la versión: " + e.getMessage());
+                });
+            }
+        });
     }
 
     private void askRenameProject(ProjectStore.Project project) {
@@ -386,6 +482,11 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             try {
                 ProjectStore.Project fresh = ProjectStore.load(this, project.projectName);
                 ProjectStore.Project renamed = ProjectStore.rename(this, fresh, newName);
+                try {
+                    ProjectHistory.renameHistory(this, project.projectName, renamed.projectName);
+                } catch (Exception ignored) {
+                    // El cambio de nombre del proyecto no debe revertirse si falla mover un historial antiguo.
+                }
                 runOnUiThread(() -> {
                     if (wasCurrent) setCurrentProjectName(renamed.projectName);
                     status.setText("✅ Proyecto renombrado a ‘" + renamed.projectName + "’. ");
@@ -417,6 +518,11 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             try {
                 ProjectStore.Project fresh = ProjectStore.load(this, project.projectName);
                 ProjectStore.delete(fresh);
+                try {
+                    ProjectHistory.deleteHistory(this, project.projectName);
+                } catch (Exception ignored) {
+                    // Si queda un historial huérfano, no debe impedir borrar el proyecto solicitado.
+                }
                 List<ProjectStore.Project> remaining = ProjectStore.list(this);
                 runOnUiThread(() -> {
                     if (wasCurrent) {
@@ -432,6 +538,58 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                         .setMessage(e.getMessage())
                         .setPositiveButton("Aceptar", null)
                         .show());
+            }
+        });
+    }
+
+    private void confirmClearText() {
+        if (textBox == null || textBox.getText().toString().isEmpty()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Limpiar texto")
+                .setMessage("¿Quieres borrar todo el texto? Antes de limpiarlo guardaré una versión de recuperación por si fue un accidente.")
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Limpiar", (dialog, which) -> checkpointAndClearText())
+                .show();
+    }
+
+    private void checkpointAndClearText() {
+        if (projectSaveRunnable != null) projectSaveHandler.removeCallbacks(projectSaveRunnable);
+        ProjectSnapshot snapshot = captureProjectSnapshot();
+        autoSaveState.setText("Guardando copia de recuperación...");
+
+        projectExecutor.execute(() -> {
+            try {
+                ProjectHistory.captureIfNeeded(this,
+                        snapshot.projectName,
+                        snapshot.text,
+                        snapshot.audioName,
+                        snapshot.voiceName,
+                        snapshot.voiceLabel,
+                        snapshot.speed,
+                        snapshot.pitch);
+                ProjectStore.save(this,
+                        snapshot.projectName,
+                        snapshot.text,
+                        snapshot.audioName,
+                        snapshot.voiceName,
+                        snapshot.voiceLabel,
+                        snapshot.speed,
+                        snapshot.pitch);
+                ProjectHistory.checkpoint(this, snapshot.projectName);
+
+                runOnUiThread(() -> {
+                    if (!snapshot.projectName.equals(currentProjectName)) return;
+                    suppressAutoSave = true;
+                    textBox.setText("");
+                    suppressAutoSave = false;
+                    scheduleProjectSave(150);
+                    status.setText("Texto limpiado. La versión anterior quedó disponible en Historial de versiones.");
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    autoSaveState.setText("No se pudo guardar la copia");
+                    status.setText("No limpié el texto porque no pude crear una copia de recuperación: " + e.getMessage());
+                });
             }
         });
     }
@@ -590,6 +748,14 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         ProjectSnapshot snapshot = captureProjectSnapshot();
         projectExecutor.execute(() -> {
             try {
+                ProjectHistory.captureIfNeeded(this,
+                        snapshot.projectName,
+                        snapshot.text,
+                        snapshot.audioName,
+                        snapshot.voiceName,
+                        snapshot.voiceLabel,
+                        snapshot.speed,
+                        snapshot.pitch);
                 ProjectStore.save(this, snapshot.projectName, snapshot.text, snapshot.audioName,
                         snapshot.voiceName, snapshot.voiceLabel, snapshot.speed, snapshot.pitch);
                 runOnUiThread(() -> {
@@ -743,6 +909,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 if (position >= 0 && position < voiceLabels.size()) status.setText("Voz seleccionada: " + voiceLabels.get(position));
                 scheduleProjectSave(400);
+                if (!suppressAutoSave && hasGeneratedOnce) scheduleAutomaticRegeneration();
             }
             @Override public void onNothingSelected(AdapterView<?> parent) {}
         });
