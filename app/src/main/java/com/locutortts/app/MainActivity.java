@@ -268,7 +268,6 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
             drawerProjectsScroll.setVisibility(View.GONE);
             return;
         }
-
         drawerProjectsButton.setText("📚 Proyectos  ▾");
         drawerProjectsScroll.setVisibility(View.VISIBLE);
         loadDrawerProjects();
@@ -299,6 +298,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                     DateFormat formatter = DateFormat.getDateTimeInstance(
                             DateFormat.SHORT, DateFormat.SHORT, new Locale("es", "MX"));
                     for (ProjectStore.Project project : projects) {
+                        LinearLayout projectRow = new LinearLayout(this);
+                        projectRow.setOrientation(LinearLayout.HORIZONTAL);
+                        projectRow.setGravity(Gravity.CENTER_VERTICAL);
+
                         Button projectButton = new Button(this);
                         String currentMark = project.projectName.equals(currentProjectName) ? "● " : "";
                         String date = formatter.format(new Date(project.updatedAt));
@@ -306,7 +309,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                         projectButton.setAllCaps(false);
                         projectButton.setTextSize(13);
                         projectButton.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-                        projectButton.setPadding(dp(12), dp(5), dp(8), dp(5));
+                        projectButton.setPadding(dp(10), dp(5), dp(4), dp(5));
                         projectButton.setOnClickListener(v -> {
                             openProject(project, true);
                             drawerProjectsExpanded = false;
@@ -314,7 +317,18 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                             drawerProjectsScroll.setVisibility(View.GONE);
                             closeDrawer();
                         });
-                        drawerProjectsContainer.addView(projectButton, new LinearLayout.LayoutParams(-1, dp(60)));
+
+                        Button more = new Button(this);
+                        more.setText("⋮");
+                        more.setTextSize(20);
+                        more.setMinWidth(0);
+                        more.setMinimumWidth(0);
+                        more.setPadding(0,0,0,0);
+                        more.setOnClickListener(v -> showProjectActions(project));
+
+                        projectRow.addView(projectButton, new LinearLayout.LayoutParams(0, dp(60), 1));
+                        projectRow.addView(more, new LinearLayout.LayoutParams(dp(44), dp(52)));
+                        drawerProjectsContainer.addView(projectRow, new LinearLayout.LayoutParams(-1, dp(60)));
                     }
 
                     int visibleItems = Math.min(projects.size(), 4);
@@ -332,6 +346,115 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                 });
             }
         });
+    }
+
+    private void showProjectActions(ProjectStore.Project project) {
+        new AlertDialog.Builder(this)
+                .setTitle(project.projectName)
+                .setItems(new String[]{"✏️ Renombrar", "🗑️ Eliminar"}, (dialog, which) -> {
+                    if (which == 0) askRenameProject(project);
+                    else confirmDeleteProject(project);
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private void askRenameProject(ProjectStore.Project project) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(project.projectName);
+        input.selectAll();
+
+        new AlertDialog.Builder(this)
+                .setTitle("Renombrar proyecto")
+                .setView(input)
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Renombrar", (dialog, which) -> renameProject(project, input.getText().toString().trim()))
+                .show();
+    }
+
+    private void renameProject(ProjectStore.Project project, String newName) {
+        if (newName.isEmpty()) {
+            toast("Escribe un nombre para el proyecto.");
+            return;
+        }
+        if (newName.equals(project.projectName)) return;
+
+        boolean wasCurrent = project.projectName.equals(currentProjectName);
+        if (wasCurrent) saveCurrentProjectAsync(false);
+        projectExecutor.execute(() -> {
+            try {
+                ProjectStore.Project fresh = ProjectStore.load(this, project.projectName);
+                ProjectStore.Project renamed = ProjectStore.rename(this, fresh, newName);
+                runOnUiThread(() -> {
+                    if (wasCurrent) setCurrentProjectName(renamed.projectName);
+                    status.setText("✅ Proyecto renombrado a ‘" + renamed.projectName + "’. ");
+                    if (drawerProjectsExpanded) loadDrawerProjects();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("No se pudo renombrar")
+                        .setMessage(e.getMessage())
+                        .setPositiveButton("Aceptar", null)
+                        .show());
+            }
+        });
+    }
+
+    private void confirmDeleteProject(ProjectStore.Project project) {
+        new AlertDialog.Builder(this)
+                .setTitle("Eliminar proyecto")
+                .setMessage("¿Quieres eliminar ‘" + project.projectName + "’? Esta acción no se puede deshacer.")
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("Eliminar", (dialog, which) -> deleteProject(project))
+                .show();
+    }
+
+    private void deleteProject(ProjectStore.Project project) {
+        boolean wasCurrent = project.projectName.equals(currentProjectName);
+        if (wasCurrent) saveCurrentProjectAsync(false);
+        projectExecutor.execute(() -> {
+            try {
+                ProjectStore.Project fresh = ProjectStore.load(this, project.projectName);
+                ProjectStore.delete(fresh);
+                List<ProjectStore.Project> remaining = ProjectStore.list(this);
+                runOnUiThread(() -> {
+                    if (wasCurrent) {
+                        if (!remaining.isEmpty()) openProject(remaining.get(0), false);
+                        else resetToEmptyProject();
+                    }
+                    status.setText("🗑️ Proyecto ‘" + project.projectName + "’ eliminado.");
+                    if (drawerProjectsExpanded) loadDrawerProjects();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("No se pudo eliminar")
+                        .setMessage(e.getMessage())
+                        .setPositiveButton("Aceptar", null)
+                        .show());
+            }
+        });
+    }
+
+    private void resetToEmptyProject() {
+        suppressAutoSave = true;
+        setCurrentProjectName("Sin título");
+        textBox.setText("");
+        nameBox.setText("locucion");
+        speedBar.setProgress(50);
+        pitchBar.setProgress(50);
+        if (voiceBox.getAdapter() != null && voiceBox.getAdapter().getCount() > 0) voiceBox.setSelection(0);
+        savedAudio = null;
+        pendingAudioFile = null;
+        pendingAudioName = "locucion.wav";
+        hasGeneratedOnce = false;
+        sessionId = "";
+        playBtn.setEnabled(false);
+        saveBtn.setEnabled(false);
+        shareBtn.setEnabled(false);
+        suppressAutoSave = false;
+        autoSaveState.setText("✓ Guardado automático");
+        saveCurrentProjectAsync(false);
     }
 
     private void openDrawer() {
