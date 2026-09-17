@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.LocutorTTS" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">#E8F0EF</item>
+        <item name="android:navigationBarColor">#F7FAF9</item>
+        <item name="android:windowBackground">#F8FAF9</item>
+        <item name="android:colorAccent">#587C78</item>
+        <item name="android:colorControlActivated">#587C78</item>
+        <item name="android:colorControlNormal">#667674</item>
+        <item name="android:colorControlHighlight">#20587C78</item>
+        <item name="android:buttonStyle">@style/Widget.LocutorTTS.Button</item>
+        <item name="android:editTextStyle">@style/Widget.LocutorTTS.EditText</item>
+        <item name="android:spinnerStyle">@style/Widget.LocutorTTS.Spinner</item>
+    </style>
+
+    <style name="Widget.LocutorTTS.Button" parent="@android:style/Widget.Material.Button">
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textColor">#294643</item>
+        <item name="android:backgroundTint">#DDE9E7</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:minWidth">48dp</item>
+        <item name="android:paddingLeft">14dp</item>
+        <item name="android:paddingRight">14dp</item>
+    </style>
+
+    <style name="Widget.LocutorTTS.EditText" parent="@android:style/Widget.Material.EditText">
+        <item name="android:textColor">#1F2F2D</item>
+        <item name="android:textColorHint">#7A8B89</item>
+        <item name="android:backgroundTint">#789693</item>
+    </style>
+
+    <style name="Widget.LocutorTTS.Spinner" parent="@android:style/Widget.Material.Spinner.Underlined">
+        <item name="android:backgroundTint">#789693</item>
+        <item name="android:popupBackground">#FCFEFD</item>
+    </style>
+
+</resources>
