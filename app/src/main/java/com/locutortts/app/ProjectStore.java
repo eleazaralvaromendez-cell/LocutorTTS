@@ -1,6 +1,7 @@
 package com.locutortts.app;
 
 import android.content.Context;
+import android.util.AtomicFile;
 
 import org.json.JSONObject;
 
@@ -66,7 +67,8 @@ final class ProjectStore {
 
     static boolean exists(Context context, String projectName) {
         try {
-            return fileFor(context, projectName).exists();
+            File file = fileFor(context, projectName);
+            return file.exists() || new File(file.getPath() + ".bak").exists();
         } catch (Exception e) {
             return false;
         }
@@ -92,10 +94,19 @@ final class ProjectStore {
         project.put("updatedAt", System.currentTimeMillis());
 
         File destination = fileFor(context, projectName);
-        try (OutputStreamWriter writer = new OutputStreamWriter(
-                new FileOutputStream(destination, false), StandardCharsets.UTF_8)) {
+        AtomicFile atomic = new AtomicFile(destination);
+        FileOutputStream stream = null;
+        try {
+            stream = atomic.startWrite();
+            OutputStreamWriter writer = new OutputStreamWriter(stream, StandardCharsets.UTF_8);
             writer.write(project.toString(2));
             writer.flush();
+            stream.getFD().sync();
+            atomic.finishWrite(stream);
+            stream = null;
+        } catch (Exception e) {
+            if (stream != null) atomic.failWrite(stream);
+            throw e;
         }
     }
 
@@ -105,23 +116,29 @@ final class ProjectStore {
         if (cleaned.isEmpty()) throw new Exception("El nombre no puede estar vacío.");
 
         File destination = fileFor(context, cleaned);
-        if (!destination.equals(project.file) && destination.exists()) {
+        if (!destination.equals(project.file) && exists(context, cleaned)) {
             throw new Exception("Ya existe un proyecto con ese nombre.");
         }
 
         save(context, cleaned, project.text, project.audioName, project.voiceName,
                 project.voiceLabel, project.speedProgress, project.pitchProgress);
 
-        if (!destination.equals(project.file) && project.file.exists() && !project.file.delete()) {
-            destination.delete();
-            throw new Exception("No se pudo completar el cambio de nombre.");
+        if (!destination.equals(project.file)) {
+            AtomicFile oldAtomic = new AtomicFile(project.file);
+            oldAtomic.delete();
+            if (project.file.exists()) {
+                new AtomicFile(destination).delete();
+                throw new Exception("No se pudo completar el cambio de nombre.");
+            }
         }
         return load(destination);
     }
 
     static void delete(Project project) throws Exception {
         if (project == null) throw new Exception("Proyecto inválido.");
-        if (project.file.exists() && !project.file.delete()) {
+        AtomicFile atomic = new AtomicFile(project.file);
+        atomic.delete();
+        if (project.file.exists() || new File(project.file.getPath() + ".bak").exists()) {
             throw new Exception("No se pudo eliminar el proyecto.");
         }
     }
@@ -148,7 +165,8 @@ final class ProjectStore {
 
     private static Project load(File file) throws Exception {
         String json;
-        try (FileInputStream in = new FileInputStream(file);
+        AtomicFile atomic = new AtomicFile(file);
+        try (FileInputStream in = atomic.openRead();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[8192];
             int n;
