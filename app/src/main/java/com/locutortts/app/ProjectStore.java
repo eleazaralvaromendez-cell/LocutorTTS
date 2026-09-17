@@ -99,6 +99,33 @@ final class ProjectStore {
         }
     }
 
+    static Project rename(Context context, Project project, String newName) throws Exception {
+        if (project == null) throw new Exception("Proyecto inválido.");
+        String cleaned = newName == null ? "" : newName.trim();
+        if (cleaned.isEmpty()) throw new Exception("El nombre no puede estar vacío.");
+
+        File destination = fileFor(context, cleaned);
+        if (!destination.equals(project.file) && destination.exists()) {
+            throw new Exception("Ya existe un proyecto con ese nombre.");
+        }
+
+        save(context, cleaned, project.text, project.audioName, project.voiceName,
+                project.voiceLabel, project.speedProgress, project.pitchProgress);
+
+        if (!destination.equals(project.file) && project.file.exists() && !project.file.delete()) {
+            destination.delete();
+            throw new Exception("No se pudo completar el cambio de nombre.");
+        }
+        return load(destination);
+    }
+
+    static void delete(Project project) throws Exception {
+        if (project == null) throw new Exception("Proyecto inválido.");
+        if (project.file.exists() && !project.file.delete()) {
+            throw new Exception("No se pudo eliminar el proyecto.");
+        }
+    }
+
     static List<Project> list(Context context) throws Exception {
         File[] files = directory(context).listFiles((dir, name) -> name.toLowerCase().endsWith(".json"));
         if (files == null || files.length == 0) return Collections.emptyList();
