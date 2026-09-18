@@ -197,22 +197,41 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         tp.setMargins(0,dp(10),0,dp(10));
         root.addView(textBox,tp);
 
-        root.addView(label("Voz",16));
-        voiceBox = new Spinner(this); root.addView(voiceBox);
+        LinearLayout voiceSettings = new LinearLayout(this);
+        voiceSettings.setOrientation(LinearLayout.VERTICAL);
+        voiceSettings.setPadding(dp(12), dp(10), dp(12), dp(12));
+        voiceSettings.setBackgroundResource(R.drawable.bg_voice_settings);
+        LinearLayout.LayoutParams voiceSettingsParams = new LinearLayout.LayoutParams(-1, -2);
+        voiceSettingsParams.setMargins(0, dp(8), 0, dp(10));
+
+        voiceSettings.addView(label("Voz",16));
+        voiceBox = new Spinner(this);
+        voiceSettings.addView(voiceBox);
 
         speedValue = label("Velocidad · 1.00x",16);
-        root.addView(speedValue);
-        speedBar = new SeekBar(this); speedBar.setMax(150); speedBar.setProgress(50); root.addView(speedBar);
+        voiceSettings.addView(speedValue);
+        speedBar = new SeekBar(this);
+        speedBar.setMax(150);
+        speedBar.setProgress(50);
+        voiceSettings.addView(speedBar);
 
         pitchValue = label("Tono · 1.00x",16);
-        root.addView(pitchValue);
-        pitchBar = new SeekBar(this); pitchBar.setMax(150); pitchBar.setProgress(50); root.addView(pitchBar);
+        voiceSettings.addView(pitchValue);
+        pitchBar = new SeekBar(this);
+        pitchBar.setMax(150);
+        pitchBar.setProgress(50);
+        voiceSettings.addView(pitchBar);
 
         setupAutoSlider(speedBar, true);
         setupAutoSlider(pitchBar, false);
 
-        root.addView(label("Nombre del audio",16));
-        nameBox = new EditText(this); nameBox.setText("locucion"); nameBox.setSingleLine(); root.addView(nameBox);
+        voiceSettings.addView(label("Nombre del audio",16));
+        nameBox = new EditText(this);
+        nameBox.setText("locucion");
+        nameBox.setSingleLine();
+        voiceSettings.addView(nameBox);
+
+        root.addView(voiceSettings, voiceSettingsParams);
 
         generateBtn = new Button(this);
         generateBtn.setText("GENERAR AUDIO");
