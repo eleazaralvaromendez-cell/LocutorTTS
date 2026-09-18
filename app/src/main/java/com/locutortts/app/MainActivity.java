@@ -226,6 +226,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         saveBtn.setText("GUARDAR AUDIO");
         saveBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_save_dark, 0, 0, 0);
         saveBtn.setCompoundDrawablePadding(dp(8));
+        saveBtn.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(194,214,209)));
+        saveBtn.setTextColor(Color.rgb(41,70,67));
         saveBtn.setEnabled(false);
         saveBtn.setOnClickListener(v -> saveAudio());
         root.addView(saveBtn);
@@ -235,6 +237,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         playBtn.setText("Escuchar");
         playBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_play_dark, 0, 0, 0);
         playBtn.setCompoundDrawablePadding(dp(7));
+        playBtn.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(229,236,234)));
+        playBtn.setTextColor(Color.rgb(41,70,67));
         playBtn.setEnabled(false);
         playBtn.setOnClickListener(v -> play());
 
@@ -242,6 +246,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         shareBtn.setText("Compartir");
         shareBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_share_dark, 0, 0, 0);
         shareBtn.setCompoundDrawablePadding(dp(7));
+        shareBtn.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(229,236,234)));
+        shareBtn.setTextColor(Color.rgb(41,70,67));
         shareBtn.setEnabled(false);
         shareBtn.setOnClickListener(v -> share());
         actions.addView(playBtn,new LinearLayout.LayoutParams(0,-2,1));
