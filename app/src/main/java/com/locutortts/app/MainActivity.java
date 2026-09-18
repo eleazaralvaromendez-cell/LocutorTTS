@@ -5,6 +5,7 @@ import android.app.AlertDialog;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.media.MediaPlayer;
@@ -151,8 +152,18 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         root.addView(help);
 
         LinearLayout row = new LinearLayout(this);
-        Button open = new Button(this); open.setText("📄 Abrir archivo"); open.setOnClickListener(v -> pickFile());
-        Button clear = new Button(this); clear.setText("Limpiar"); clear.setOnClickListener(v -> confirmClearText());
+        Button open = new Button(this);
+        open.setText("📄 Abrir archivo");
+        open.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(215,231,227)));
+        open.setTextColor(Color.rgb(41,70,67));
+        open.setOnClickListener(v -> pickFile());
+
+        Button clear = new Button(this);
+        clear.setText("Limpiar");
+        clear.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(233,222,210)));
+        clear.setTextColor(Color.rgb(91,72,58));
+        clear.setOnClickListener(v -> confirmClearText());
+
         row.addView(open, new LinearLayout.LayoutParams(0,-2,1));
         row.addView(clear, new LinearLayout.LayoutParams(0,-2,1));
         root.addView(row);
