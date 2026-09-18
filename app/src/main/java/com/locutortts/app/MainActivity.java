@@ -235,7 +235,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         drawer = new LinearLayout(this);
         drawer.setOrientation(LinearLayout.VERTICAL);
         drawer.setPadding(dp(18), dp(24), dp(18), dp(18));
-        drawer.setBackgroundColor(Color.WHITE);
+        drawer.setBackgroundColor(Color.rgb(247,244,238));
         drawer.setVisibility(View.GONE);
 
         TextView title = label("🎙️ Locutor TTS", 24);
