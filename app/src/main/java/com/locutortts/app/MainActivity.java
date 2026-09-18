@@ -21,6 +21,7 @@ import android.speech.tts.Voice;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.*;
 
@@ -161,9 +162,21 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         textBox.setGravity(Gravity.TOP);
         textBox.setMinLines(12);
         textBox.setBackgroundColor(Color.WHITE);
-        textBox.setVerticalScrollBarEnabled(true);
-        textBox.setScrollbarFadingEnabled(false);
         textBox.setPadding(dp(10),dp(10),dp(10),dp(10));
+
+        // El EditText ya sabe desplazarse por sí solo. Solo evitamos que el
+        // ScrollView de toda la pantalla robe el gesto mientras el dedo está
+        // dentro del guion. No forzamos scrollbars ni movement methods.
+        textBox.setOnTouchListener((v, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE) {
+                v.getParent().requestDisallowInterceptTouchEvent(true);
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                v.getParent().requestDisallowInterceptTouchEvent(false);
+            }
+            return false;
+        });
+
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, dp(300));
         tp.setMargins(0,dp(10),0,dp(10));
         root.addView(textBox,tp);
