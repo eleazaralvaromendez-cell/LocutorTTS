@@ -134,7 +134,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         menu.setPadding(0,0,0,0);
         menu.setOnClickListener(v -> openDrawer());
         header.addView(menu, new LinearLayout.LayoutParams(dp(52), dp(52)));
-        TextView appTitle = label("🎙️ Locutor TTS", 26);
+        TextView appTitle = label("Locutor TTS", 26);
+        appTitle.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_mic_small, 0, 0, 0);
+        appTitle.setCompoundDrawablePadding(dp(8));
         appTitle.setPadding(dp(8),0,0,0);
         header.addView(appTitle, new LinearLayout.LayoutParams(0,-2,1));
         root.addView(header);
@@ -153,7 +155,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         LinearLayout row = new LinearLayout(this);
         Button open = new Button(this);
-        open.setText("📄 Abrir archivo");
+        open.setText("Abrir archivo");
+        open.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_file_dark, 0, 0, 0);
+        open.setCompoundDrawablePadding(dp(7));
         open.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(215,231,227)));
         open.setTextColor(Color.rgb(41,70,67));
         open.setOnClickListener(v -> pickFile());
@@ -218,11 +222,28 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         generateBtn.setTextColor(Color.rgb(248,250,249));
         generateBtn.setOnClickListener(v -> generate());
         root.addView(generateBtn);
-        saveBtn = new Button(this); saveBtn.setText("💾 GUARDAR AUDIO"); saveBtn.setEnabled(false); saveBtn.setOnClickListener(v -> saveAudio()); root.addView(saveBtn);
+        saveBtn = new Button(this);
+        saveBtn.setText("GUARDAR AUDIO");
+        saveBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_save_dark, 0, 0, 0);
+        saveBtn.setCompoundDrawablePadding(dp(8));
+        saveBtn.setEnabled(false);
+        saveBtn.setOnClickListener(v -> saveAudio());
+        root.addView(saveBtn);
 
         LinearLayout actions = new LinearLayout(this);
-        playBtn = new Button(this); playBtn.setText("▶ Escuchar"); playBtn.setEnabled(false); playBtn.setOnClickListener(v -> play());
-        shareBtn = new Button(this); shareBtn.setText("↗ Compartir"); shareBtn.setEnabled(false); shareBtn.setOnClickListener(v -> share());
+        playBtn = new Button(this);
+        playBtn.setText("Escuchar");
+        playBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_play_dark, 0, 0, 0);
+        playBtn.setCompoundDrawablePadding(dp(7));
+        playBtn.setEnabled(false);
+        playBtn.setOnClickListener(v -> play());
+
+        shareBtn = new Button(this);
+        shareBtn.setText("Compartir");
+        shareBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_share_dark, 0, 0, 0);
+        shareBtn.setCompoundDrawablePadding(dp(7));
+        shareBtn.setEnabled(false);
+        shareBtn.setOnClickListener(v -> share());
         actions.addView(playBtn,new LinearLayout.LayoutParams(0,-2,1));
         actions.addView(shareBtn,new LinearLayout.LayoutParams(0,-2,1));
         root.addView(actions);
@@ -256,7 +277,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         drawer.setBackgroundColor(Color.rgb(247,244,238));
         drawer.setVisibility(View.GONE);
 
-        TextView title = label("🎙️ Locutor TTS", 24);
+        TextView title = label("Locutor TTS", 24);
+        title.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_mic_small, 0, 0, 0);
+        title.setCompoundDrawablePadding(dp(8));
         drawer.addView(title);
         drawerCurrent = label("Proyecto: Sin título", 14);
         drawerCurrent.setTextColor(Color.DKGRAY);
@@ -269,13 +292,17 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         drawer.addView(divider, dividerParams);
 
         Button newProject = new Button(this);
-        newProject.setText("＋ Nuevo proyecto");
+        newProject.setText("Nuevo proyecto");
+        newProject.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_add_dark, 0, 0, 0);
+        newProject.setCompoundDrawablePadding(dp(9));
         newProject.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         newProject.setOnClickListener(v -> askNewProject());
         drawer.addView(newProject, new LinearLayout.LayoutParams(-1, dp(56)));
 
         drawerProjectsButton = new Button(this);
-        drawerProjectsButton.setText("📚 Proyectos  ▸");
+        drawerProjectsButton.setText("Proyectos  ▸");
+        drawerProjectsButton.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_projects_dark, 0, 0, 0);
+        drawerProjectsButton.setCompoundDrawablePadding(dp(9));
         drawerProjectsButton.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         drawerProjectsButton.setOnClickListener(v -> toggleDrawerProjects());
         drawer.addView(drawerProjectsButton, new LinearLayout.LayoutParams(-1, dp(56)));
@@ -298,11 +325,11 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
     private void toggleDrawerProjects() {
         drawerProjectsExpanded = !drawerProjectsExpanded;
         if (!drawerProjectsExpanded) {
-            drawerProjectsButton.setText("📚 Proyectos  ▸");
+            drawerProjectsButton.setText("Proyectos  ▸");
             drawerProjectsScroll.setVisibility(View.GONE);
             return;
         }
-        drawerProjectsButton.setText("📚 Proyectos  ▾");
+        drawerProjectsButton.setText("Proyectos  ▾");
         drawerProjectsScroll.setVisibility(View.VISIBLE);
         loadDrawerProjects();
     }
@@ -347,7 +374,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
                         projectButton.setOnClickListener(v -> {
                             openProject(project, true);
                             drawerProjectsExpanded = false;
-                            drawerProjectsButton.setText("📚 Proyectos  ▸");
+                            drawerProjectsButton.setText("Proyectos  ▸");
                             drawerProjectsScroll.setVisibility(View.GONE);
                             closeDrawer();
                         });
