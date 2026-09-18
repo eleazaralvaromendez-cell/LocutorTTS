@@ -7,6 +7,7 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Bundle;
@@ -20,7 +21,9 @@ import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.text.method.ScrollingMovementMethod;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.*;
 
@@ -149,6 +152,10 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         help.setTextColor(Color.DKGRAY);
         root.addView(help);
 
+        TextView scriptLabel = label("Guion",16);
+        scriptLabel.setPadding(0, dp(12), 0, dp(6));
+        root.addView(scriptLabel);
+
         LinearLayout row = new LinearLayout(this);
         Button open = new Button(this); open.setText("📄 Abrir archivo"); open.setOnClickListener(v -> pickFile());
         Button clear = new Button(this); clear.setText("Limpiar"); clear.setOnClickListener(v -> confirmClearText());
@@ -158,10 +165,45 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         textBox = new EditText(this);
         textBox.setHint("Escribe o pega aquí tu guion...");
-        textBox.setGravity(Gravity.TOP);
+        textBox.setGravity(Gravity.TOP | Gravity.START);
         textBox.setMinLines(12);
-        textBox.setBackgroundColor(Color.WHITE);
-        textBox.setPadding(dp(10),dp(10),dp(10),dp(10));
+        textBox.setTextColor(Color.rgb(31,47,45));
+        textBox.setHintTextColor(Color.rgb(122,139,137));
+
+        GradientDrawable scriptBackground = new GradientDrawable();
+        scriptBackground.setColor(Color.rgb(253,254,254));
+        scriptBackground.setCornerRadius(dp(10));
+        scriptBackground.setStroke(dp(1), Color.rgb(181,199,197));
+        textBox.setBackground(scriptBackground);
+        textBox.setBackgroundTintList(null);
+        textBox.setPadding(dp(14),dp(14),dp(18),dp(14));
+
+        textBox.setVerticalScrollBarEnabled(true);
+        textBox.setScrollbarFadingEnabled(false);
+        textBox.setScrollBarStyle(View.SCROLLBARS_INSIDE_INSET);
+        textBox.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        textBox.setNestedScrollingEnabled(true);
+        textBox.setMovementMethod(ScrollingMovementMethod.getInstance());
+
+        final float[] scriptTouchY = {0f};
+        textBox.setOnTouchListener((v, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                scriptTouchY[0] = event.getY();
+                v.getParent().requestDisallowInterceptTouchEvent(true);
+            } else if (action == MotionEvent.ACTION_MOVE) {
+                float deltaY = event.getY() - scriptTouchY[0];
+                boolean canScrollInside = deltaY > 0
+                        ? textBox.canScrollVertically(-1)
+                        : textBox.canScrollVertically(1);
+                v.getParent().requestDisallowInterceptTouchEvent(canScrollInside);
+                scriptTouchY[0] = event.getY();
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                v.getParent().requestDisallowInterceptTouchEvent(false);
+            }
+            return false;
+        });
+
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, dp(300));
         tp.setMargins(0,dp(10),0,dp(10));
         root.addView(textBox,tp);
