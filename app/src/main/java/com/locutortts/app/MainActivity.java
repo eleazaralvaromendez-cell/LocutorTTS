@@ -211,7 +211,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         nameBox = new EditText(this); nameBox.setText("locucion"); nameBox.setSingleLine(); root.addView(nameBox);
 
         generateBtn = new Button(this);
-        generateBtn.setText("🎧 GENERAR AUDIO");
+        generateBtn.setText("GENERAR AUDIO");
+        generateBtn.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_headphones_white, 0, 0, 0);
+        generateBtn.setCompoundDrawablePadding(dp(8));
         generateBtn.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(74,107,102)));
         generateBtn.setTextColor(Color.rgb(248,250,249));
         generateBtn.setOnClickListener(v -> generate());
