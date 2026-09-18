@@ -161,6 +161,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         textBox.setGravity(Gravity.TOP);
         textBox.setMinLines(12);
         textBox.setBackgroundColor(Color.WHITE);
+        textBox.setVerticalScrollBarEnabled(true);
+        textBox.setScrollbarFadingEnabled(false);
         textBox.setPadding(dp(10),dp(10),dp(10),dp(10));
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, dp(300));
         tp.setMargins(0,dp(10),0,dp(10));
