@@ -119,7 +119,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(p,p,p,p);
-        root.setBackgroundColor(Color.rgb(248,250,252));
+        root.setBackgroundColor(Color.rgb(247,244,238));
         scroll.addView(root);
 
         LinearLayout header = new LinearLayout(this);
