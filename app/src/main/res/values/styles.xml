@@ -30,6 +30,7 @@
     <style name="Widget.LocutorTTS.EditText" parent="@android:style/Widget.Material.EditText">
         <item name="android:textColor">#1F2F2D</item>
         <item name="android:textColorHint">#7A8B89</item>
+        <item name="android:backgroundTint">#789693</item>
     </style>
 
     <style name="Widget.LocutorTTS.Spinner" parent="@android:style/Widget.Material.Spinner.Underlined">
