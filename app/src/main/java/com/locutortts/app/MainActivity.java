@@ -161,7 +161,7 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         textBox.setHint("Escribe o pega aquí tu guion...");
         textBox.setGravity(Gravity.TOP);
         textBox.setMinLines(12);
-        textBox.setBackgroundColor(Color.rgb(252,253,253));
+        textBox.setBackgroundResource(R.drawable.bg_script_editor);
         textBox.setBackgroundTintList(null);
         textBox.setPadding(dp(10),dp(10),dp(10),dp(10));
 
