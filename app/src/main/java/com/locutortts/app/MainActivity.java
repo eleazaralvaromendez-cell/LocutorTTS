@@ -123,31 +123,45 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         root.setBackgroundColor(Color.rgb(247,244,238));
         scroll.addView(root);
 
+        LinearLayout headerPanel = new LinearLayout(this);
+        headerPanel.setOrientation(LinearLayout.VERTICAL);
+        headerPanel.setPadding(dp(10), dp(8), dp(10), dp(8));
+        headerPanel.setBackgroundResource(R.drawable.bg_header_panel);
+        LinearLayout.LayoutParams headerPanelParams = new LinearLayout.LayoutParams(-1, -2);
+        headerPanelParams.setMargins(0, 0, 0, dp(10));
+
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
+
         Button menu = new Button(this);
         menu.setText("☰");
         menu.setTextSize(22);
         menu.setMinWidth(0);
         menu.setMinimumWidth(0);
         menu.setPadding(0,0,0,0);
+        menu.setBackgroundTintList(ColorStateList.valueOf(Color.rgb(215,231,227)));
         menu.setOnClickListener(v -> openDrawer());
         header.addView(menu, new LinearLayout.LayoutParams(dp(52), dp(52)));
-        TextView appTitle = label("Locutor TTS", 26);
+
+        TextView appTitle = label("Locutor TTS", 24);
         appTitle.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_mic_small, 0, 0, 0);
         appTitle.setCompoundDrawablePadding(dp(8));
         appTitle.setPadding(dp(8),0,0,0);
         header.addView(appTitle, new LinearLayout.LayoutParams(0,-2,1));
-        root.addView(header);
+        headerPanel.addView(header);
 
         projectTitle = label("Proyecto: Sin título", 15);
         projectTitle.setTextColor(Color.rgb(55,65,81));
-        root.addView(projectTitle);
+        projectTitle.setPadding(dp(4), 0, 0, 0);
+        headerPanel.addView(projectTitle);
+
         autoSaveState = label("✓ Guardado automático", 12);
         autoSaveState.setTextColor(Color.rgb(75,85,99));
-        autoSaveState.setPadding(0,0,0,dp(6));
-        root.addView(autoSaveState);
+        autoSaveState.setPadding(dp(4),0,0,dp(2));
+        headerPanel.addView(autoSaveState);
+
+        root.addView(headerPanel, headerPanelParams);
 
         TextView help = label("Genera el audio, escúchalo primero y guárdalo solamente cuando te guste. Tus cambios del proyecto se guardan automáticamente.", 15);
         help.setTextColor(Color.DKGRAY);
