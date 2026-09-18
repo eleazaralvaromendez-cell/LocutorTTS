@@ -161,7 +161,8 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         textBox.setHint("Escribe o pega aquí tu guion...");
         textBox.setGravity(Gravity.TOP);
         textBox.setMinLines(12);
-        textBox.setBackgroundColor(Color.WHITE);
+        textBox.setBackgroundColor(Color.rgb(252,253,253));
+        textBox.setBackgroundTintList(null);
         textBox.setPadding(dp(10),dp(10),dp(10),dp(10));
 
         // El EditText ya sabe desplazarse por sí solo. Solo evitamos que el
