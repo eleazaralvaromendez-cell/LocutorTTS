@@ -156,20 +156,12 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
         row.addView(clear, new LinearLayout.LayoutParams(0,-2,1));
         root.addView(row);
 
-        TextView scriptLabel = label("Guion",16);
-        scriptLabel.setPadding(0, dp(12), 0, dp(6));
-        root.addView(scriptLabel);
-
         textBox = new EditText(this);
         textBox.setHint("Escribe o pega aquí tu guion...");
-        textBox.setGravity(Gravity.TOP | Gravity.START);
+        textBox.setGravity(Gravity.TOP);
         textBox.setMinLines(12);
-        textBox.setBackgroundColor(Color.rgb(253,254,254));
-        textBox.setPadding(dp(14),dp(14),dp(14),dp(14));
-        textBox.setVerticalScrollBarEnabled(true);
-        textBox.setScrollbarFadingEnabled(false);
-        textBox.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
-        textBox.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        textBox.setBackgroundColor(Color.WHITE);
+        textBox.setPadding(dp(10),dp(10),dp(10),dp(10));
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, dp(300));
         tp.setMargins(0,dp(10),0,dp(10));
         root.addView(textBox,tp);
