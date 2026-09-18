@@ -163,8 +163,9 @@ public class MainActivity extends Activity implements TextToSpeech.OnInitListene
 
         root.addView(headerPanel, headerPanelParams);
 
-        TextView help = label("Genera el audio, escúchalo primero y guárdalo solamente cuando te guste. Tus cambios del proyecto se guardan automáticamente.", 15);
-        help.setTextColor(Color.DKGRAY);
+        TextView help = label("Escribe o abre tu guion, elige una voz y genera el audio. Escúchalo antes de guardarlo.", 14);
+        help.setTextColor(Color.rgb(83, 99, 96));
+        help.setPadding(0, 0, 0, dp(4));
         root.addView(help);
 
         LinearLayout row = new LinearLayout(this);
